@@ -35,35 +35,26 @@ elif sport == "Cycling":
         if not required_cols.issubset(df.columns):
             st.error(f"Your file must include at least: {', '.join(required_cols)}")
         else:
-            editable_cols = ["Name", "Value", "Position"]
-            if "Rank FTPS" in df.columns:
-                editable_cols.append("Rank FTPS")
-            df = st.data_editor(df[editable_cols], use_container_width=True)
-
-            # Rank-to-points table only used if FTPS mode is selected
+            # Background FTPS calculation if Rank FTPS is available
             if solver_mode == "Maximize FTPS" and "Rank FTPS" in df.columns:
-                st.subheader("🎯 Points Per Rank (Editable)")
                 default_rank_points = {rank: max(0, 150 - (rank - 1) * 5) for rank in range(1, 31)}
-                rank_df = pd.DataFrame({"Rank": list(default_rank_points), "Points": list(default_rank_points.values())})
-                edited_rank_df = st.data_editor(rank_df, use_container_width=True, num_rows="fixed")
-                rank_points = dict(zip(edited_rank_df["Rank"], edited_rank_df["Points"]))
-                df["FTPS"] = df["Rank FTPS"].apply(lambda r: rank_points.get(int(r), 0) if pd.notnull(r) else 0)
-                st.success("✅ FTPS calculated from Rank FTPS.")
+                df["FTPS"] = df["Rank FTPS"].apply(
+                    lambda r: default_rank_points.get(int(r), 0) if pd.notnull(r) else 0
+                )
             elif solver_mode == "Maximize FTPS":
-                st.warning("⚠️ You selected FTPS optimization but no 'Rank FTPS' column was found.")
-                df["FTPS"] = 0  # Fallback to avoid errors
-
-            st.dataframe(df)
+                st.warning("⚠️ FTPS optimization selected but 'Rank FTPS' column is missing.")
+                df["FTPS"] = 0  # fallback
 
             include_players = st.sidebar.multiselect("Players to INCLUDE", df["Name"])
             exclude_players = st.sidebar.multiselect("Players to EXCLUDE", df["Name"])
 
-            if st.button("Optimize Cycling Team"):
+            optimize_clicked = st.sidebar.button("🚀 Optimize Cycling Team")
+
+            if optimize_clicked:
                 players = df.to_dict("records")
                 prob = LpProblem("FantasyTeam", LpMaximize)
                 x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
-                # Select objective
                 if solver_mode == "Maximize FTPS":
                     prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
                 else:
@@ -91,5 +82,6 @@ elif sport == "Cycling":
                 st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="optimized_team.csv")
     else:
         st.info("Please upload your Cycling Excel file to continue.")
+
 else:
     st.warning(f"The constraint system for **{sport}** is not configured yet. Coming soon!")
