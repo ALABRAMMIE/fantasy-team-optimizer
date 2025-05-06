@@ -39,10 +39,4 @@ elif sport == "Cycling":
             players = df.to_dict("records")
 
             prob = LpProblem("FantasyTeam", LpMaximize)
-            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
-
-            prob += lpSum(x[p["Name"]] * p["FTPS"] for p in players)
-            prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
-            prob += lpSum(x[p["Name"]] for p in players) == team_size
-
-            for name
+            x = {p["Name"]: LpVariable(p["Name"], cat="
