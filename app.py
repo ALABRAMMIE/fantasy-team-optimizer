@@ -124,7 +124,7 @@ if optimize_clicked:
         else:
             st.error("❌ Couldn't generate a valid team matching your constraints.")
 
-    else:
+    elif solver_mode in ["Maximize FTPS", "Maximize Budget Usage"]:
         prob = LpProblem("FantasyTeam", LpMaximize)
         x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
