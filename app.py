@@ -61,58 +61,103 @@ elif sport == "Cycling":
 
             optimize_clicked = st.sidebar.button("🚀 Optimize Cycling Team")
 
-            if optimize_clicked:
-                players = edited_df.to_dict("records")
-                prob = LpProblem("FantasyTeam", LpMaximize)
-                x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+if optimize_clicked:
+    players = edited_df.to_dict("records")
+    x_vars = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
-                # Solver objective
-                if solver_mode in ["Maximize FTPS", "Match Winning FTPS Profile"]:
-                    prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
-                else:
-                    prob += lpSum(x[p["Name"]] * p["Value"] for p in players)
+    if solver_mode == "Match Winning FTPS Profile":
+        import random
+        best_team = None
+        best_error = float("inf")
+        best_result = None
+        reference_profile = [
+            0.2229, 0.1915, 0.1548, 0.0959, 0.0798, 0.0624, 0.0510,
+            0.0451, 0.0379, 0.0233, 0.0193, 0.0161, 0.0000
+        ]
 
-                # Constraints
-                prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
-                prob += lpSum(x[p["Name"]] for p in players) == team_size
+        for _ in range(50):  # try 50 randomizations
+            random.shuffle(players)
 
-                for name in include_players:
-                    prob += x[name] == 1
-                for name in exclude_players:
-                    prob += x[name] == 0
+            prob = LpProblem("FantasyTeam", LpMaximize)
+            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
-                prob.solve()
-                selected = [p for p in players if x[p["Name"]].value() == 1]
+            # Maximize FTPS
+            prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
 
-                st.subheader("✅ Optimized Cycling Team")
-                result_df = pd.DataFrame(selected)
-                st.dataframe(result_df)
+            # Constraints
+            prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
+            prob += lpSum(x[p["Name"]] for p in players) == team_size
 
-                total_value = sum(p["Value"] for p in selected)
-                st.write(f"**Total Value**: {total_value}")
+            for name in include_players:
+                prob += x[name] == 1
+            for name in exclude_players:
+                prob += x[name] == 0
 
-                if solver_mode != "Maximize Budget Usage":
-                    total_ftps = sum(p["FTPS"] for p in selected)
-                    st.write(f"**Total FTPS**: {total_ftps}")
+            prob.solve()
+            selected = [p for p in players if x[p["Name"]].value() == 1]
 
-                    if solver_mode == "Match Winning FTPS Profile":
-                        # Historical profile from your data
-                        reference_profile = [
-                            0.2229, 0.1915, 0.1548, 0.0959, 0.0798, 0.0624, 0.0510,
-                            0.0451, 0.0379, 0.0233, 0.0193, 0.0161, 0.0000
-                        ]
+            if len(selected) != team_size:
+                continue  # invalid solution
 
-                        selected_ftps = sorted([p["FTPS"] for p in selected], reverse=True)
-                        team_share = [v / total_ftps for v in selected_ftps]
+            total_ftps = sum(p["FTPS"] for p in selected)
+            ftps_sorted = sorted([p["FTPS"] for p in selected], reverse=True)
+            ftps_share = [v / total_ftps for v in ftps_sorted]
+            while len(ftps_share) < 13:
+                ftps_share.append(0.0)
 
-                        # Pad if fewer than 13 players (safety check)
-                        while len(team_share) < 13:
-                            team_share.append(0.0)
+            error = sum((ftps_share[i] - reference_profile[i]) ** 2 for i in range(13))
+            if error < best_error:
+                best_error = error
+                best_team = selected
+                best_result = {
+                    "value": sum(p["Value"] for p in selected),
+                    "ftps": total_ftps,
+                    "error": error
+                }
 
-                        profile_error = sum((team_share[i] - reference_profile[i]) ** 2 for i in range(13))
-                        st.write(f"🎯 **Similarity to Winning Profile**: {round(1 - profile_error, 4)} (1 = perfect match)")
+        if best_team:
+            st.subheader("🎯 Best-Matching Team (to Winning FTPS Profile)")
+            result_df = pd.DataFrame(best_team)
+            st.dataframe(result_df)
 
-                st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="optimized_team.csv")
+            st.write(f"**Total Value**: {round(best_result['value'], 2)}")
+            st.write(f"**Total FTPS**: {round(best_result['ftps'], 2)}")
+            st.write(f"**Profile Similarity Score**: {round(1 - best_result['error'], 4)} (1 = perfect match)")
+
+            st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="profile_optimized_team.csv")
+        else:
+            st.error("❌ Couldn't generate a valid team matching your constraints.")
+    else:
+        # Existing FTPS or Budget optimization mode
+        prob = LpProblem("FantasyTeam", LpMaximize)
+        x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+
+        if solver_mode == "Maximize FTPS":
+            prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
+        else:
+            prob += lpSum(x[p["Name"]] * p["Value"] for p in players)
+
+        prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
+        prob += lpSum(x[p["Name"]] for p in players) == team_size
+
+        for name in include_players:
+            prob += x[name] == 1
+        for name in exclude_players:
+            prob += x[name] == 0
+
+        prob.solve()
+        selected = [p for p in players if x[p["Name"]].value() == 1]
+
+        st.subheader("✅ Optimized Cycling Team")
+        result_df = pd.DataFrame(selected)
+        st.dataframe(result_df)
+
+        st.write(f"**Total Value**: {sum(p['Value'] for p in selected)}")
+        if solver_mode == "Maximize FTPS":
+            st.write(f"**Total FTPS**: {sum(p['FTPS'] for p in selected)}")
+
+        st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="optimized_team.csv")
+
     else:
         st.info("Please upload your Cycling Excel file to continue.")
 
