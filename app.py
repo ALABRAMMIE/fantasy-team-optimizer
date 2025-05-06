@@ -33,10 +33,10 @@ elif sport == "Cycling":
         if not required_cols.issubset(df.columns):
             st.error(f"Your file must include these columns: {', '.join(required_cols)}")
         else:
-            st.subheader("📋 Uploaded Data")
-            st.dataframe(df)
+            st.subheader("📋 Edit Your Data (especially Rank FTPS)")
+            editable_df = st.data_editor(df, use_container_width=True, num_rows="dynamic")
 
-            # Step 1: Show editable Rank → Points table
+            # Points table for rank mapping
             default_rank_points = {rank: max(0, 150 - (rank - 1) * 5) for rank in range(1, 31)}
             rank_df = pd.DataFrame({
                 "Rank": list(default_rank_points.keys()),
@@ -47,18 +47,19 @@ elif sport == "Cycling":
             edited_rank_df = st.data_editor(rank_df, use_container_width=True, num_rows="fixed")
             rank_points = dict(zip(edited_rank_df["Rank"], edited_rank_df["Points"]))
 
-            # Step 2: Calculate FTPS from Rank FTPS
-            df["FTPS"] = df["Rank FTPS"].apply(lambda r: rank_points.get(int(r), 0) if pd.notnull(r) else 0)
+            # Calculate FTPS from edited Rank FTPS values
+            editable_df["FTPS"] = editable_df["Rank FTPS"].apply(
+                lambda r: rank_points.get(int(r), 0) if pd.notnull(r) else 0
+            )
 
-            st.success("✅ FTPS calculated from projected Rank FTPS.")
-            st.dataframe(df)
+            st.success("✅ FTPS recalculated based on updated Rank FTPS.")
+            st.dataframe(editable_df)
 
-            # Step 3: Optimization inputs
-            include_players = st.sidebar.multiselect("Players to INCLUDE", df["Name"])
-            exclude_players = st.sidebar.multiselect("Players to EXCLUDE", df["Name"])
+            include_players = st.sidebar.multiselect("Players to INCLUDE", editable_df["Name"])
+            exclude_players = st.sidebar.multiselect("Players to EXCLUDE", editable_df["Name"])
 
             if st.button("Optimize Cycling Team"):
-                players = df.to_dict("records")
+                players = editable_df.to_dict("records")
                 prob = LpProblem("FantasyTeam", LpMaximize)
                 x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
@@ -82,7 +83,6 @@ elif sport == "Cycling":
                 st.write(f"**Total FTPS**: {sum(p['FTPS'] for p in selected)}")
 
                 st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="optimized_team.csv")
- 
     else:
         st.info("Please upload your Cycling Excel file to continue.")
 else:
