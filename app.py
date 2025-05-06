@@ -35,7 +35,10 @@ elif sport == "Cycling":
         if not required_cols.issubset(df.columns):
             st.error(f"Your file must include at least: {', '.join(required_cols)}")
         else:
-            # Background FTPS calculation if Rank FTPS is available
+            st.subheader("📋 Uploaded Player Data")
+            st.dataframe(df)
+
+            # FTPS calculation (in background)
             if solver_mode == "Maximize FTPS" and "Rank FTPS" in df.columns:
                 default_rank_points = {rank: max(0, 150 - (rank - 1) * 5) for rank in range(1, 31)}
                 df["FTPS"] = df["Rank FTPS"].apply(
