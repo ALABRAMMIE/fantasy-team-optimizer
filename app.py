@@ -63,7 +63,6 @@ elif sport == "Cycling":
 
 if optimize_clicked:
     players = edited_df.to_dict("records")
-    x_vars = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
     if solver_mode == "Match Winning FTPS Profile":
         import random
@@ -81,10 +80,7 @@ if optimize_clicked:
             prob = LpProblem("FantasyTeam", LpMaximize)
             x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
-            # Maximize FTPS
             prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
-
-            # Constraints
             prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
             prob += lpSum(x[p["Name"]] for p in players) == team_size
 
@@ -97,7 +93,7 @@ if optimize_clicked:
             selected = [p for p in players if x[p["Name"]].value() == 1]
 
             if len(selected) != team_size:
-                continue  # invalid solution
+                continue
 
             total_ftps = sum(p["FTPS"] for p in selected)
             ftps_sorted = sorted([p["FTPS"] for p in selected], reverse=True)
@@ -127,8 +123,8 @@ if optimize_clicked:
             st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="profile_optimized_team.csv")
         else:
             st.error("❌ Couldn't generate a valid team matching your constraints.")
+
     else:
-        # Existing FTPS or Budget optimization mode
         prob = LpProblem("FantasyTeam", LpMaximize)
         x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
