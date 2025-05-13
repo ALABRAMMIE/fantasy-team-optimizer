@@ -56,15 +56,20 @@ elif sport == "Cycling":
                 st.warning("⚠️ FTPS optimization selected but 'Rank FTPS' column is missing.")
                 edited_df["FTPS"] = 0
 
+            players = edited_df.to_dict("records")
+
             if "toggle_choices" not in st.session_state:
                 st.session_state.toggle_choices = {}
 
-            include_players = []
-            exclude_players = []
+            # Build sidebar constraint defaults based on toggle state
+            default_includes = [name for name, val in st.session_state.toggle_choices.items() if val == "✔ Include"]
+            default_excludes = [name for name, val in st.session_state.toggle_choices.items() if val == "✖ Exclude"]
+
+            include_players = st.sidebar.multiselect("Players to INCLUDE", edited_df["Name"], default=default_includes)
+            exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited_df["Name"], default=default_excludes)
 
             optimize_clicked = st.sidebar.button("🚀 Optimize Cycling Team")
 
-            players = edited_df.to_dict("records")
             target_values = None
             if solver_mode in ["Match Winning FTPS Profile", "Closest FTP Match"] and template_file:
                 try:
@@ -141,7 +146,7 @@ elif sport == "Cycling":
             if "result_df" in st.session_state:
                 st.subheader("🎯 Optimized Team")
                 result_df = st.session_state["result_df"]
-                new_include, new_exclude = [], []
+                new_toggle = {}
 
                 for _, row in result_df.iterrows():
                     default = st.session_state.toggle_choices.get(row["Name"], "– Neutral")
@@ -151,13 +156,7 @@ elif sport == "Cycling":
                         key=f"toggle_{row['Name']}",
                         index=["✔ Include", "✖ Exclude", "– Neutral"].index(default)
                     )
-                    st.session_state.toggle_choices[row["Name"]] = choice
-                    if choice == "✔ Include":
-                        new_include.append(row["Name"])
-                    elif choice == "✖ Exclude":
-                        new_exclude.append(row["Name"])
+                    new_toggle[row["Name"]] = choice
 
-                st.session_state["include_players"] = new_include
-                st.session_state["exclude_players"] = new_exclude
-
+                st.session_state.toggle_choices.update(new_toggle)
                 st.dataframe(result_df)
