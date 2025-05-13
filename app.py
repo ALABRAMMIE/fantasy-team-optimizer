@@ -61,7 +61,7 @@ elif sport == "Cycling":
 
             if optimize_clicked:
                 players = edited_df.to_dict("records")
-                reference_profile = None
+                target_values = None
 
                 if solver_mode == "Match Winning FTPS Profile" and template_file:
                     try:
@@ -74,19 +74,14 @@ elif sport == "Cycling":
 
                         percentages = [v / original_total for v in raw_values]
                         target_values = [p * budget for p in percentages]
-                        total_target = sum(target_values)
-                        reference_profile = [v / total_target for v in target_values]
 
-                        st.write("📊 Historic values (C2:C14):", raw_values)
-                        st.write("📈 Target values scaled to budget:", target_values)
-                        st.write("📐 Normalized FTP share profile:", reference_profile)
-
+                        st.write("📊 Target FTP values scaled to budget:", target_values)
                     except Exception as e:
                         st.error(f"Failed to process historic profile: {e}")
-                        reference_profile = None
+                        target_values = None
 
                 if solver_mode == "Match Winning FTPS Profile":
-                    if reference_profile:
+                    if target_values:
                         best_team = None
                         best_error = float("inf")
                         best_result = None
@@ -112,36 +107,34 @@ elif sport == "Cycling":
                             if len(selected) != team_size:
                                 continue
 
-                            total_ftps = sum(p["FTPS"] for p in selected)
-                            ftps_sorted = sorted([p["FTPS"] for p in selected], reverse=True)
-                            ftps_share = [v / total_ftps for v in ftps_sorted]
-                            while len(ftps_share) < 13:
-                                ftps_share.append(0.0)
+                            selected_ftps = sorted([p["FTPS"] for p in selected], reverse=True)
+                            while len(selected_ftps) < 13:
+                                selected_ftps.append(0.0)
 
-                            error = sum((ftps_share[i] - reference_profile[i]) ** 2 for i in range(13))
+                            error = sum((selected_ftps[i] - target_values[i]) ** 2 for i in range(13))
                             if error < best_error:
                                 best_error = error
                                 best_team = selected
                                 best_result = {
                                     "value": sum(p["Value"] for p in selected),
-                                    "ftps": total_ftps,
+                                    "ftps": sum(p["FTPS"] for p in selected),
                                     "error": error
                                 }
 
                         if best_team:
-                            st.subheader("🎯 Best-Matching Team (to Winning FTPS Profile)")
+                            st.subheader("🎯 Best-Matching Team (FTP vs. Target FTP Values)")
                             result_df = pd.DataFrame(best_team)
                             st.dataframe(result_df)
 
                             st.write(f"**Total Value**: {round(best_result['value'], 2)}")
                             st.write(f"**Total FTPS**: {round(best_result['ftps'], 2)}")
-                            st.write(f"**Profile Similarity Score**: {round(1 - best_result['error'], 4)} (1 = perfect match)")
+                            st.write(f"**Matching Score (lower is better)**: {round(best_result['error'], 2)}")
 
                             st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="profile_optimized_team.csv")
                         else:
                             st.error("❌ Couldn't generate a valid team matching your constraints.")
                     else:
-                        st.warning("📉 Please upload a valid Historic Winners Template to match the FTP profile.")
+                        st.warning("📉 Please upload a valid Historic Winners Template to match target FTP values.")
 
                 else:
                     # Max FTPS or Max Budget modes
