@@ -68,10 +68,23 @@ elif sport == "Cycling":
                     best_team = None
                     best_error = float("inf")
                     best_result = None
-                    reference_profile = [
-                        0.2229, 0.1915, 0.1548, 0.0959, 0.0798, 0.0624, 0.0510,
-                        0.0451, 0.0379, 0.0233, 0.0193, 0.0161, 0.0000
-                    ]
+st.sidebar.markdown("**Upload Historic Winners Profile Template**")
+template_file = st.sidebar.file_uploader("Upload Template (e.g. Historic Winners)", type=["xlsx"], key="template")
+
+reference_profile = None
+if template_file:
+    try:
+        profile_template = pd.read_excel(template_file)
+        col_name = "Value per rider from distribution (D)"
+        if col_name in profile_template.columns:
+            target_values = profile_template[col_name].dropna().values
+            total_target = sum(target_values)
+            reference_profile = [v / total_target for v in target_values]
+        else:
+            st.error(f"Column '{col_name}' not found in the uploaded template.")
+    except Exception as e:
+        st.error(f"Failed to load template: {e}")
+
 
                     for _ in range(50):  # try 50 randomizations
                         random.shuffle(players)
