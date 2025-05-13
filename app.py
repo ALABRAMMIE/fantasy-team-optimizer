@@ -29,8 +29,6 @@ elif sport == "Cycling":
     ])
 
     uploaded_file = st.file_uploader("Upload your Cycling Excel file", type=["xlsx"])
-
-    # Second file uploader for the reference profile
     template_file = st.sidebar.file_uploader("Upload Historic Winners Template", type=["xlsx"], key="template")
 
     if uploaded_file:
@@ -49,7 +47,6 @@ elif sport == "Cycling":
 
             edited_df = st.data_editor(df[editable_cols], use_container_width=True)
 
-            # FTPS Calculation
             if solver_mode != "Maximize Budget Usage" and "Rank FTPS" in edited_df.columns:
                 default_rank_points = {rank: max(0, 150 - (rank - 1) * 5) for rank in range(1, 31)}
                 edited_df["FTPS"] = edited_df["Rank FTPS"].apply(
@@ -65,20 +62,20 @@ elif sport == "Cycling":
 
             if optimize_clicked:
                 players = edited_df.to_dict("records")
+                reference_profile = None
+
+                # Load fixed range D2:D14 from template if using profile match mode
+                if solver_mode == "Match Winning FTPS Profile" and template_file:
+                    try:
+                        profile_template = pd.read_excel(template_file, usecols="D", skiprows=1, nrows=13, header=None)
+                        target_values = profile_template[0].dropna().values
+                        total_target = sum(target_values)
+                        reference_profile = [v / total_target for v in target_values]
+                    except Exception as e:
+                        st.error(f"Failed to load profile values from D2:D14: {e}")
+                        reference_profile = None
 
                 if solver_mode == "Match Winning FTPS Profile":
-                    reference_profile = None
-if template_file:
-    try:
-        # Load fixed range D2:D14 from the first sheet
-        profile_template = pd.read_excel(template_file, usecols="D", skiprows=1, nrows=13, header=None)
-        target_values = profile_template[0].dropna().values
-        total_target = sum(target_values)
-        reference_profile = [v / total_target for v in target_values]
-    except Exception as e:
-        st.error(f"Failed to load profile values from D2:D14: {e}")
-        reference_profile = None
-
                     if reference_profile:
                         best_team = None
                         best_error = float("inf")
@@ -137,7 +134,7 @@ if template_file:
                         st.warning("📉 Please upload a valid Historic Winners Template to match the FTP profile.")
 
                 else:
-                    # Max FTPS or Max Budget Usage
+                    # Max FTPS or Max Budget modes
                     prob = LpProblem("FantasyTeam", LpMaximize)
                     x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
