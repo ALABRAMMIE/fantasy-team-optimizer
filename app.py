@@ -5,7 +5,7 @@ import random
 
 st.title("Fantasy Team Optimizer")
 
-# Sport selection list
+# Sport options
 sport_options = [
     "-- Choose a sport --",
     "Cycling", "Speed Skating", "Formula 1", "Stock Exchange", "Tennis", "MotoGP", "Football",
@@ -66,19 +66,23 @@ elif sport == "Cycling":
                 if solver_mode == "Match Winning FTPS Profile" and template_file:
                     try:
                         profile_template = pd.read_excel(template_file, header=None)
-                        percentages = profile_template.iloc[1:14, 2].astype(float).values  # C2 to C14
+                        raw_values = profile_template.iloc[1:14, 2].astype(float).values  # Column C (C2:C14)
 
-                        if len(percentages) != 13:
-                            st.error("❌ Template must contain 13 percentage values in cells C2 to C14.")
-                        else:
-                            target_values = [p * budget for p in percentages]
-                            total_target = sum(target_values)
-                            reference_profile = [v / total_target for v in target_values]
+                        original_total = sum(raw_values)
+                        if original_total == 0:
+                            raise ValueError("Historic total value from template is zero.")
 
-                            st.write("📊 Target FTP values from percentages × budget:", target_values)
-                            st.write("📈 Normalized FTP distribution (reference profile):", reference_profile)
+                        percentages = [v / original_total for v in raw_values]
+                        target_values = [p * budget for p in percentages]
+                        total_target = sum(target_values)
+                        reference_profile = [v / total_target for v in target_values]
+
+                        st.write("📊 Historic values (C2:C14):", raw_values)
+                        st.write("📈 Target values scaled to budget:", target_values)
+                        st.write("📐 Normalized FTP share profile:", reference_profile)
+
                     except Exception as e:
-                        st.error(f"Failed to load percentages from C2:C14: {e}")
+                        st.error(f"Failed to process historic profile: {e}")
                         reference_profile = None
 
                 if solver_mode == "Match Winning FTPS Profile":
