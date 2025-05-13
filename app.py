@@ -77,7 +77,7 @@ elif sport == "Cycling":
                     except Exception as e:
                         st.error(f"Failed to process template: {e}")
 
-                # Smarter greedy match
+                # ✅ Closest Match by Value (No Budget Constraint)
                 if solver_mode == "Closest FTP Match" and target_values:
                     available_players = [p for p in players if p["Name"] not in exclude_players]
                     selected_team = []
@@ -91,10 +91,10 @@ elif sport == "Cycling":
                         )
 
                         found = False
-                        for p in candidates[:10]:  # Try top 10 closest
+                        for p in candidates:
                             if include_players and len(selected_team) < len(include_players) and p["Name"] not in include_players:
                                 continue
-                            if running_value_total + p["Value"] <= budget:
+                            if p["Name"] not in used_names:
                                 selected_team.append(p)
                                 used_names.add(p["Name"])
                                 running_value_total += p["Value"]
@@ -102,20 +102,24 @@ elif sport == "Cycling":
                                 break
 
                         if not found:
-                            st.warning(f"⚠️ No available rider found near value {round(target, 2)} without exceeding budget.")
-                            break
+                            st.warning(f"⚠️ Could not match target value {round(target, 2)} to any available rider.")
 
                     if len(selected_team) == team_size:
                         result_df = pd.DataFrame(selected_team)
-                        st.subheader("🎯 Closest Match by Value (Greedy + Budget-Aware)")
+                        st.subheader("🎯 Closest Match by Value (Greedy, Budget Ignored)")
                         st.dataframe(result_df)
+
                         st.write(f"**Total Value**: {round(running_value_total, 2)}")
                         st.write(f"**Total FTPS**: {round(sum(p['FTPS'] for p in selected_team), 2)}")
+
+                        if running_value_total > budget:
+                            st.warning(f"⚠️ Team exceeds budget by {round(running_value_total - budget, 2)}!")
+
                         st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="closest_match_by_value.csv")
                     else:
-                        st.error("❌ Could not select a complete team without exceeding budget.")
+                        st.error("❌ Could not fill all positions. Please check player pool or constraints.")
 
-                # Existing profile-fit solver logic
+                # Existing solver: Match Winning FTPS Profile
                 elif solver_mode == "Match Winning FTPS Profile" and target_values:
                     best_team = None
                     best_error = float("inf")
@@ -165,7 +169,7 @@ elif sport == "Cycling":
                     else:
                         st.error("❌ Couldn't generate a valid team matching your constraints.")
 
-                # Maximize FTPS or Budget
+                # Solver: Maximize FTPS or Maximize Budget
                 elif solver_mode in ["Maximize FTPS", "Maximize Budget Usage"]:
                     prob = LpProblem("FantasyTeam", LpMaximize)
                     x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
