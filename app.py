@@ -14,7 +14,6 @@ sport_options = [
     "Ski Jumping", "MMA", "Entertainment"
 ]
 
-# Sport selector
 sport = st.sidebar.selectbox("Select a sport", sport_options)
 
 if sport == "-- Choose a sport --":
@@ -64,13 +63,17 @@ elif sport == "Cycling":
                 players = edited_df.to_dict("records")
                 reference_profile = None
 
-                # Load fixed range D2:D14 from template if using profile match mode
                 if solver_mode == "Match Winning FTPS Profile" and template_file:
                     try:
                         profile_template = pd.read_excel(template_file, usecols="D", skiprows=1, nrows=13, header=None)
-                        target_values = profile_template[0].dropna().values
-                        total_target = sum(target_values)
-                        reference_profile = [v / total_target for v in target_values]
+                        st.write("📊 Raw values from D2:D14:", profile_template.head(13))
+                        target_values = profile_template[0].dropna().astype(float).values
+
+                        if len(target_values) != 13:
+                            st.error("❌ Template must contain 13 numeric values in cells D2 to D14.")
+                        else:
+                            total_target = sum(target_values)
+                            reference_profile = [v / total_target for v in target_values]
                     except Exception as e:
                         st.error(f"Failed to load profile values from D2:D14: {e}")
                         reference_profile = None
