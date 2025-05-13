@@ -61,7 +61,7 @@ elif sport == "Cycling":
             if "toggle_choices" not in st.session_state:
                 st.session_state.toggle_choices = {}
 
-            # Sync sidebar constraints
+            # Build sidebar constraint defaults based on toggle state
             default_includes = [name for name, val in st.session_state.toggle_choices.items() if val == "✔ Include"]
             default_excludes = [name for name, val in st.session_state.toggle_choices.items() if val == "✖ Exclude"]
 
@@ -147,7 +147,6 @@ elif sport == "Cycling":
                 st.subheader("🎯 Optimized Team")
                 result_df = st.session_state["result_df"]
                 new_toggle = {}
-                symbol_column = []
 
                 for _, row in result_df.iterrows():
                     default = st.session_state.toggle_choices.get(row["Name"], "– Neutral")
@@ -158,9 +157,6 @@ elif sport == "Cycling":
                         index=["✔ Include", "✖ Exclude", "– Neutral"].index(default)
                     )
                     new_toggle[row["Name"]] = choice
-                    symbol_column.append(choice.split(" ")[0])  # Just symbol
 
                 st.session_state.toggle_choices.update(new_toggle)
-
-                result_df.insert(0, "🔧", symbol_column)
                 st.dataframe(result_df)
