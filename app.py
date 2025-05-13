@@ -96,7 +96,7 @@ elif sport == "Cycling":
                                 continue
                             if include_players and p["Name"] not in include_players and len(selected_team) < len(include_players):
                                 continue
-                            diff = abs(p["FTPS"] - target)
+                            diff = abs(p["Value"] - target)
                             if diff < closest_diff:
                                 closest = p
                                 closest_diff = diff
