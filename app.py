@@ -62,10 +62,11 @@ elif sport == "Cycling":
             exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited_df["Name"])
             optimize_clicked = st.sidebar.button("🚀 Optimize Cycling Team")
 
-            if optimize_clicked or "reoptimize" in st.session_state:
-                if "reoptimize" in st.session_state:
-                    exclude_players += st.session_state["reoptimize"]
-                    del st.session_state["reoptimize"]
+            if optimize_clicked or "reoptimize_toggle" in st.session_state:
+                if "reoptimize_toggle" in st.session_state:
+                    include_players += st.session_state["reoptimize_toggle"].get("include", [])
+                    exclude_players += st.session_state["reoptimize_toggle"].get("exclude", [])
+                    del st.session_state["reoptimize_toggle"]
 
                 players = edited_df.to_dict("records")
                 target_values = None
@@ -147,15 +148,24 @@ elif sport == "Cycling":
 
                 if result_df is not None:
                     st.subheader("🎯 Optimized Team")
-                    checkboxes = {}
+                    toggle_status = {}
+                    st.markdown("**Include / Exclude Each Rider:**")
                     for _, row in result_df.iterrows():
-                        checkboxes[row["Name"]] = st.checkbox(f"{row['Name']}", value=True)
+                        choice = st.radio(
+                            f"{row['Name']}", ["✔ Include", "✖ Exclude", "– Neutral"],
+                            horizontal=True,
+                            key=row["Name"]
+                        )
+                        toggle_status[row["Name"]] = choice
 
-                    result_df = result_df[result_df["Name"].map(checkboxes)]
+                    include_list = [name for name, choice in toggle_status.items() if choice == "✔ Include"]
+                    exclude_list = [name for name, choice in toggle_status.items() if choice == "✖ Exclude"]
+
                     st.dataframe(result_df)
 
-                    if len(checkboxes) > len(result_df):
-                        excluded = [name for name, checked in checkboxes.items() if not checked]
-                        if st.button("🔁 Re-optimize with Changes"):
-                            st.session_state["reoptimize"] = excluded
-                            st.experimental_rerun()
+                    if st.button("🔁 Re-optimize with Toggles"):
+                        st.session_state["reoptimize_toggle"] = {
+                            "include": include_list,
+                            "exclude": exclude_list
+                        }
+                        st.experimental_rerun()
