@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from pulp import LpProblem, LpMinimize, LpVariable, lpSum
+from pulp import LpProblem, LpMinimize, LpMaximize, LpVariable, lpSum
 import random
 
 st.title("Fantasy Team Optimizer")
@@ -23,7 +23,10 @@ elif sport == "Cycling":
     team_size = st.sidebar.number_input("Team Size", value=13, step=1)
 
     solver_mode = st.sidebar.radio("Solver Objective", [
-        "Maximize FTPS", "Maximize Budget Usage", "Match Winning FTPS Profile"
+        "Maximize FTPS",
+        "Maximize Budget Usage",
+        "Match Winning FTPS Profile",
+        "Closest FTP Match"
     ])
 
     uploaded_file = st.file_uploader("Upload your Cycling Excel file", type=["xlsx"])
@@ -62,7 +65,7 @@ elif sport == "Cycling":
                 players = edited_df.to_dict("records")
                 target_values = None
 
-                if solver_mode == "Match Winning FTPS Profile" and template_file:
+                if solver_mode in ["Match Winning FTPS Profile", "Closest FTP Match"] and template_file:
                     try:
                         profile_template = pd.read_excel(template_file, header=None)
                         raw_values = profile_template.iloc[1:14, 2].astype(float).values  # Column C (C2:C14)
@@ -79,63 +82,94 @@ elif sport == "Cycling":
                         st.error(f"Failed to process historic profile: {e}")
                         target_values = None
 
-                if solver_mode == "Match Winning FTPS Profile":
-                    if target_values:
-                        best_team = None
-                        best_error = float("inf")
-                        best_result = None
+                # Closest FTP Match (greedy search)
+                if solver_mode == "Closest FTP Match" and target_values:
+                    available_players = [p for p in players if p["Name"] not in exclude_players]
+                    selected_team = []
+                    used_names = set()
 
-                        for _ in range(50):  # try 50 randomizations
-                            random.shuffle(players)
-
-                            prob = LpProblem("FantasyTeam", LpMinimize)
-                            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
-
-                            prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
-                            prob += lpSum(x[p["Name"]] for p in players) == team_size
-
-                            for name in include_players:
-                                prob += x[name] == 1
-                            for name in exclude_players:
-                                prob += x[name] == 0
-
-                            prob.solve()
-                            selected = [p for p in players if x[p["Name"]].value() == 1]
-                            if len(selected) != team_size:
+                    for target in target_values:
+                        closest = None
+                        closest_diff = float("inf")
+                        for p in available_players:
+                            if p["Name"] in used_names:
                                 continue
+                            if include_players and p["Name"] not in include_players and len(selected_team) < len(include_players):
+                                continue
+                            diff = abs(p["FTPS"] - target)
+                            if diff < closest_diff:
+                                closest = p
+                                closest_diff = diff
 
-                            player_ftps = sorted([p["FTPS"] for p in selected], reverse=True)
-                            target_sorted = sorted(target_values, reverse=True)
-                            while len(player_ftps) < 13:
-                                player_ftps.append(0.0)
+                        if closest:
+                            selected_team.append(closest)
+                            used_names.add(closest["Name"])
 
-                            error = sum((player_ftps[i] - target_sorted[i]) ** 2 for i in range(13))
-                            if error < best_error:
-                                best_error = error
-                                best_team = selected
-                                best_result = {
-                                    "value": sum(p["Value"] for p in selected),
-                                    "ftps": sum(p["FTPS"] for p in selected),
-                                    "error": error
-                                }
+                    total_value = sum(p["Value"] for p in selected_team)
+                    total_ftps = sum(p["FTPS"] for p in selected_team)
 
-                        if best_team:
-                            st.subheader("🎯 Best-Matching Team (FTP vs. Target FTP Values)")
-                            result_df = pd.DataFrame(best_team)
-                            st.dataframe(result_df)
-
-                            st.write(f"**Total Value**: {round(best_result['value'], 2)}")
-                            st.write(f"**Total FTPS**: {round(best_result['ftps'], 2)}")
-                            st.write(f"**Total Matching Error (lower is better)**: {round(best_result['error'], 2)}")
-
-                            st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="profile_optimized_team.csv")
-                        else:
-                            st.error("❌ Couldn't generate a valid team matching your constraints.")
+                    if len(selected_team) == team_size and total_value <= budget:
+                        st.subheader("🎯 Closest FTP Match Team")
+                        result_df = pd.DataFrame(selected_team)
+                        st.dataframe(result_df)
+                        st.write(f"**Total Value**: {round(total_value, 2)}")
+                        st.write(f"**Total FTPS**: {round(total_ftps, 2)}")
+                        st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="closest_ftp_match_team.csv")
                     else:
-                        st.warning("📉 Please upload a valid Historic Winners Template to match target FTP values.")
+                        st.error("❌ Couldn't form a valid team within budget/size constraints using closest-match logic.")
 
-                else:
-                    # Max FTPS or Max Budget modes
+                # Match Winning FTPS Profile (minimize squared error)
+                elif solver_mode == "Match Winning FTPS Profile" and target_values:
+                    best_team = None
+                    best_error = float("inf")
+                    best_result = None
+
+                    for _ in range(50):
+                        random.shuffle(players)
+                        prob = LpProblem("FantasyTeam", LpMinimize)
+                        x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+
+                        prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
+                        prob += lpSum(x[p["Name"]] for p in players) == team_size
+
+                        for name in include_players:
+                            prob += x[name] == 1
+                        for name in exclude_players:
+                            prob += x[name] == 0
+
+                        prob.solve()
+                        selected = [p for p in players if x[p["Name"]].value() == 1]
+                        if len(selected) != team_size:
+                            continue
+
+                        player_ftps = sorted([p["FTPS"] for p in selected], reverse=True)
+                        target_sorted = sorted(target_values, reverse=True)
+                        while len(player_ftps) < 13:
+                            player_ftps.append(0.0)
+
+                        error = sum((player_ftps[i] - target_sorted[i]) ** 2 for i in range(13))
+                        if error < best_error:
+                            best_error = error
+                            best_team = selected
+                            best_result = {
+                                "value": sum(p["Value"] for p in selected),
+                                "ftps": sum(p["FTPS"] for p in selected),
+                                "error": error
+                            }
+
+                    if best_team:
+                        st.subheader("🎯 Best-Matching Team (FTP vs. Target FTP Values)")
+                        result_df = pd.DataFrame(best_team)
+                        st.dataframe(result_df)
+                        st.write(f"**Total Value**: {round(best_result['value'], 2)}")
+                        st.write(f"**Total FTPS**: {round(best_result['ftps'], 2)}")
+                        st.write(f"**Total Matching Error (lower is better)**: {round(best_result['error'], 2)}")
+                        st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="profile_optimized_team.csv")
+                    else:
+                        st.error("❌ Couldn't generate a valid team matching your constraints.")
+
+                # Maximize FTPS or Budget
+                elif solver_mode in ["Maximize FTPS", "Maximize Budget Usage"]:
                     prob = LpProblem("FantasyTeam", LpMaximize)
                     x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
@@ -158,11 +192,9 @@ elif sport == "Cycling":
                     st.subheader("✅ Optimized Cycling Team")
                     result_df = pd.DataFrame(selected)
                     st.dataframe(result_df)
-
                     st.write(f"**Total Value**: {sum(p['Value'] for p in selected)}")
                     if solver_mode == "Maximize FTPS":
                         st.write(f"**Total FTPS**: {sum(p['FTPS'] for p in selected)}")
-
                     st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="optimized_team.csv")
     else:
         st.info("Please upload your Cycling Excel file to continue.")
