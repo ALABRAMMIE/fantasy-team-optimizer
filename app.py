@@ -58,38 +58,35 @@ elif sport == "Cycling":
                 st.warning("⚠️ FTPS optimization selected but 'Rank FTPS' column is missing.")
                 edited_df["FTPS"] = 0
 
+            # Display selected include/exclude
             include_players = st.sidebar.multiselect("Players to INCLUDE", edited_df["Name"])
             exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited_df["Name"])
             optimize_clicked = st.sidebar.button("🚀 Optimize Cycling Team")
 
-            if optimize_clicked or "reoptimize_toggle" in st.session_state:
-                if "reoptimize_toggle" in st.session_state:
-                    include_players += st.session_state["reoptimize_toggle"].get("include", [])
-                    exclude_players += st.session_state["reoptimize_toggle"].get("exclude", [])
-                    del st.session_state["reoptimize_toggle"]
+            if "toggle_choices" not in st.session_state:
+                st.session_state.toggle_choices = {}
 
-                players = edited_df.to_dict("records")
-                target_values = None
+            players = edited_df.to_dict("records")
+            target_values = None
+            result_df = None
 
-                if solver_mode in ["Match Winning FTPS Profile", "Closest FTP Match"] and template_file:
-                    try:
-                        profile_template = pd.read_excel(template_file, header=None)
-                        raw_values = profile_template.iloc[1:14, 2].astype(float).values
-                        original_total = sum(raw_values)
-                        percentages = [v / original_total for v in raw_values]
-                        target_values = [p * budget for p in percentages]
-                    except Exception as e:
-                        st.error(f"Failed to process template: {e}")
+            if solver_mode in ["Match Winning FTPS Profile", "Closest FTP Match"] and template_file:
+                try:
+                    profile_template = pd.read_excel(template_file, header=None)
+                    raw_values = profile_template.iloc[1:14, 2].astype(float).values
+                    original_total = sum(raw_values)
+                    percentages = [v / original_total for v in raw_values]
+                    target_values = [p * budget for p in percentages]
+                except Exception as e:
+                    st.error(f"Failed to process template: {e}")
 
-                result_df = None
-
-                # Closest FTP Match
+            # Perform optimization only when button clicked
+            if optimize_clicked:
                 if solver_mode == "Closest FTP Match" and target_values:
                     available_players = [p for p in players if p["Name"] not in exclude_players]
                     selected_team = []
                     used_names = set()
                     total_value = 0.0
-
                     for target in target_values:
                         candidates = sorted(
                             [p for p in available_players if p["Name"] not in used_names],
@@ -101,10 +98,8 @@ elif sport == "Cycling":
                                 used_names.add(p["Name"])
                                 total_value += p["Value"]
                                 break
-
                     result_df = pd.DataFrame(selected_team)
 
-                # Match Winning FTPS Profile
                 elif solver_mode == "Match Winning FTPS Profile" and target_values:
                     best_team, best_error = None, float("inf")
                     for _ in range(50):
@@ -129,7 +124,6 @@ elif sport == "Cycling":
                             best_team = selected
                     result_df = pd.DataFrame(best_team)
 
-                # Maximize FTPS / Budget
                 elif solver_mode in ["Maximize FTPS", "Maximize Budget Usage"]:
                     prob = LpProblem("FantasyTeam", LpMaximize)
                     x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
@@ -146,26 +140,29 @@ elif sport == "Cycling":
                     prob.solve()
                     result_df = pd.DataFrame([p for p in players if x[p["Name"]].value() == 1])
 
-                if result_df is not None:
-                    st.subheader("🎯 Optimized Team")
-                    toggle_status = {}
-                    st.markdown("**Include / Exclude Each Rider:**")
-                    for _, row in result_df.iterrows():
-                        choice = st.radio(
-                            f"{row['Name']}", ["✔ Include", "✖ Exclude", "– Neutral"],
-                            horizontal=True,
-                            key=row["Name"]
-                        )
-                        toggle_status[row["Name"]] = choice
+            if result_df is not None:
+                st.subheader("🎯 Optimized Team")
+                new_include, new_exclude = [], []
 
-                    include_list = [name for name, choice in toggle_status.items() if choice == "✔ Include"]
-                    exclude_list = [name for name, choice in toggle_status.items() if choice == "✖ Exclude"]
+                for _, row in result_df.iterrows():
+                    default = st.session_state.toggle_choices.get(row["Name"], "– Neutral")
+                    choice = st.radio(
+                        f"{row['Name']}", ["✔ Include", "✖ Exclude", "– Neutral"],
+                        horizontal=True,
+                        key=f"toggle_{row['Name']}",
+                        index=["✔ Include", "✖ Exclude", "– Neutral"].index(default)
+                    )
+                    st.session_state.toggle_choices[row["Name"]] = choice
+                    if choice == "✔ Include":
+                        new_include.append(row["Name"])
+                    elif choice == "✖ Exclude":
+                        new_exclude.append(row["Name"])
 
-                    st.dataframe(result_df)
-
-                    if st.button("🔁 Re-optimize with Toggles"):
-                        st.session_state["reoptimize_toggle"] = {
-                            "include": include_list,
-                            "exclude": exclude_list
-                        }
-                        st.experimental_rerun()
+                # Update sidebar inputs
+                st.sidebar.markdown("---")
+                st.sidebar.markdown("🔁 Updated From Toggles:")
+                st.sidebar.write("✔ Include:", new_include)
+                st.sidebar.write("✖ Exclude:", new_exclude)
+                include_players[:] = new_include
+                exclude_players[:] = new_exclude
+                st.dataframe(result_df)
