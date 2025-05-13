@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from pulp import LpProblem, LpMaximize, LpVariable, lpSum
+import random
 
 st.title("Fantasy Team Optimizer")
 
@@ -27,8 +28,10 @@ elif sport == "Cycling":
         "Maximize FTPS", "Maximize Budget Usage", "Match Winning FTPS Profile"
     ])
 
-    st.sidebar.markdown("---")
-    uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
+    uploaded_file = st.file_uploader("Upload your Cycling Excel file", type=["xlsx"])
+
+    # Second file uploader for the reference profile
+    template_file = st.sidebar.file_uploader("Upload Historic Winners Template", type=["xlsx"], key="template")
 
     if uploaded_file:
         df = pd.read_excel(uploaded_file)
@@ -64,80 +67,79 @@ elif sport == "Cycling":
                 players = edited_df.to_dict("records")
 
                 if solver_mode == "Match Winning FTPS Profile":
-                    import random
-                    best_team = None
-                    best_error = float("inf")
-                    best_result = None
-st.sidebar.markdown("**Upload Historic Winners Profile Template**")
-template_file = st.sidebar.file_uploader("Upload Template (e.g. Historic Winners)", type=["xlsx"], key="template")
+                    reference_profile = None
+                    if template_file:
+                        try:
+                            profile_template = pd.read_excel(template_file)
+                            col_name = "Value per rider from distribution (D)"
+                            if col_name in profile_template.columns:
+                                target_values = profile_template[col_name].dropna().values
+                                total_target = sum(target_values)
+                                reference_profile = [v / total_target for v in target_values]
+                            else:
+                                st.error(f"Column '{col_name}' not found in the uploaded template.")
+                        except Exception as e:
+                            st.error(f"Failed to load template: {e}")
 
-reference_profile = None
-if template_file:
-    try:
-        profile_template = pd.read_excel(template_file)
-        col_name = "Value per rider from distribution (D)"
-        if col_name in profile_template.columns:
-            target_values = profile_template[col_name].dropna().values
-            total_target = sum(target_values)
-            reference_profile = [v / total_target for v in target_values]
-        else:
-            st.error(f"Column '{col_name}' not found in the uploaded template.")
-    except Exception as e:
-        st.error(f"Failed to load template: {e}")
+                    if reference_profile:
+                        best_team = None
+                        best_error = float("inf")
+                        best_result = None
 
+                        for _ in range(50):  # try 50 randomizations
+                            random.shuffle(players)
 
-                    for _ in range(50):  # try 50 randomizations
-                        random.shuffle(players)
+                            prob = LpProblem("FantasyTeam", LpMaximize)
+                            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
-                        prob = LpProblem("FantasyTeam", LpMaximize)
-                        x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+                            prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
+                            prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
+                            prob += lpSum(x[p["Name"]] for p in players) == team_size
 
-                        prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
-                        prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
-                        prob += lpSum(x[p["Name"]] for p in players) == team_size
+                            for name in include_players:
+                                prob += x[name] == 1
+                            for name in exclude_players:
+                                prob += x[name] == 0
 
-                        for name in include_players:
-                            prob += x[name] == 1
-                        for name in exclude_players:
-                            prob += x[name] == 0
+                            prob.solve()
+                            selected = [p for p in players if x[p["Name"]].value() == 1]
 
-                        prob.solve()
-                        selected = [p for p in players if x[p["Name"]].value() == 1]
+                            if len(selected) != team_size:
+                                continue
 
-                        if len(selected) != team_size:
-                            continue
+                            total_ftps = sum(p["FTPS"] for p in selected)
+                            ftps_sorted = sorted([p["FTPS"] for p in selected], reverse=True)
+                            ftps_share = [v / total_ftps for v in ftps_sorted]
+                            while len(ftps_share) < 13:
+                                ftps_share.append(0.0)
 
-                        total_ftps = sum(p["FTPS"] for p in selected)
-                        ftps_sorted = sorted([p["FTPS"] for p in selected], reverse=True)
-                        ftps_share = [v / total_ftps for v in ftps_sorted]
-                        while len(ftps_share) < 13:
-                            ftps_share.append(0.0)
+                            error = sum((ftps_share[i] - reference_profile[i]) ** 2 for i in range(13))
+                            if error < best_error:
+                                best_error = error
+                                best_team = selected
+                                best_result = {
+                                    "value": sum(p["Value"] for p in selected),
+                                    "ftps": total_ftps,
+                                    "error": error
+                                }
 
-                        error = sum((ftps_share[i] - reference_profile[i]) ** 2 for i in range(13))
-                        if error < best_error:
-                            best_error = error
-                            best_team = selected
-                            best_result = {
-                                "value": sum(p["Value"] for p in selected),
-                                "ftps": total_ftps,
-                                "error": error
-                            }
+                        if best_team:
+                            st.subheader("🎯 Best-Matching Team (to Winning FTPS Profile)")
+                            result_df = pd.DataFrame(best_team)
+                            st.dataframe(result_df)
 
-                    if best_team:
-                        st.subheader("🎯 Best-Matching Team (to Winning FTPS Profile)")
-                        result_df = pd.DataFrame(best_team)
-                        st.dataframe(result_df)
+                            st.write(f"**Total Value**: {round(best_result['value'], 2)}")
+                            st.write(f"**Total FTPS**: {round(best_result['ftps'], 2)}")
+                            st.write(f"**Profile Similarity Score**: {round(1 - best_result['error'], 4)} (1 = perfect match)")
 
-                        st.write(f"**Total Value**: {round(best_result['value'], 2)}")
-                        st.write(f"**Total FTPS**: {round(best_result['ftps'], 2)}")
-                        st.write(f"**Profile Similarity Score**: {round(1 - best_result['error'], 4)} (1 = perfect match)")
-
-                        st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="profile_optimized_team.csv")
+                            st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="profile_optimized_team.csv")
+                        else:
+                            st.error("❌ Couldn't generate a valid team matching your constraints.")
                     else:
-                        st.error("❌ Couldn't generate a valid team matching your constraints.")
+                        st.warning("📉 Please upload a valid Historic Winners Template to match the FTP profile.")
 
                 else:
-                    # Max FTPS or Max Budget modes
+                    # Max FTPS or Max Budget Usage
                     prob = LpProblem("FantasyTeam", LpMaximize)
                     x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
@@ -168,7 +170,5 @@ if template_file:
                     st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="optimized_team.csv")
     else:
         st.info("Please upload your Cycling Excel file to continue.")
-
-
 else:
     st.warning(f"The constraint system for **{sport}** is not configured yet. Coming soon!")
