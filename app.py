@@ -68,16 +68,14 @@ elif sport == "Cycling":
                 if solver_mode in ["Match Winning FTPS Profile", "Closest FTP Match"] and template_file:
                     try:
                         profile_template = pd.read_excel(template_file, header=None)
-                        raw_values = profile_template.iloc[1:14, 2].astype(float).values  # Column C (C2:C14)
+                        raw_values = profile_template.iloc[1:14, 2].astype(float).values  # C2:C14
                         original_total = sum(raw_values)
                         percentages = [v / original_total for v in raw_values]
                         target_values = [p * budget for p in percentages]
-
-                        st.write("📊 Target Values Scaled to Budget:", target_values)
+                        # st.write("📊 Target Values Scaled to Budget:", target_values)  # HIDDEN
                     except Exception as e:
                         st.error(f"Failed to process template: {e}")
 
-                # ✅ Closest Match by Value (No Budget Constraint)
                 if solver_mode == "Closest FTP Match" and target_values:
                     available_players = [p for p in players if p["Name"] not in exclude_players]
                     selected_team = []
@@ -119,7 +117,6 @@ elif sport == "Cycling":
                     else:
                         st.error("❌ Could not fill all positions. Please check player pool or constraints.")
 
-                # Existing solver: Match Winning FTPS Profile
                 elif solver_mode == "Match Winning FTPS Profile" and target_values:
                     best_team = None
                     best_error = float("inf")
@@ -169,7 +166,6 @@ elif sport == "Cycling":
                     else:
                         st.error("❌ Couldn't generate a valid team matching your constraints.")
 
-                # Solver: Maximize FTPS or Maximize Budget
                 elif solver_mode in ["Maximize FTPS", "Maximize Budget Usage"]:
                     prob = LpProblem("FantasyTeam", LpMaximize)
                     x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
