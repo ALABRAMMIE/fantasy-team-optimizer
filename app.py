@@ -35,7 +35,6 @@ elif sport == "Cycling":
 
     if uploaded_file:
         df = pd.read_excel(uploaded_file)
-
         required_cols = {"Name", "Value"}
         if not required_cols.issubset(df.columns):
             st.error(f"Your file must include at least: {', '.join(required_cols)}")
@@ -46,7 +45,6 @@ elif sport == "Cycling":
                 editable_cols.append("Position")
             if "Rank FTPS" in df.columns:
                 editable_cols.append("Rank FTPS")
-
             edited_df = st.data_editor(df[editable_cols], use_container_width=True)
 
             if solver_mode != "Maximize Budget Usage" and "Rank FTPS" in edited_df.columns:
@@ -58,18 +56,16 @@ elif sport == "Cycling":
                 st.warning("⚠️ FTPS optimization selected but 'Rank FTPS' column is missing.")
                 edited_df["FTPS"] = 0
 
-            # Display selected include/exclude
-            include_players = st.sidebar.multiselect("Players to INCLUDE", edited_df["Name"])
-            exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited_df["Name"])
-            optimize_clicked = st.sidebar.button("🚀 Optimize Cycling Team")
+            players = edited_df.to_dict("records")
 
             if "toggle_choices" not in st.session_state:
                 st.session_state.toggle_choices = {}
 
-            players = edited_df.to_dict("records")
-            target_values = None
-            result_df = None
+            include_players = st.sidebar.multiselect("Players to INCLUDE", edited_df["Name"])
+            exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited_df["Name"])
+            optimize_clicked = st.sidebar.button("🚀 Optimize Cycling Team")
 
+            target_values = None
             if solver_mode in ["Match Winning FTPS Profile", "Closest FTP Match"] and template_file:
                 try:
                     profile_template = pd.read_excel(template_file, header=None)
@@ -80,12 +76,11 @@ elif sport == "Cycling":
                 except Exception as e:
                     st.error(f"Failed to process template: {e}")
 
-            # Perform optimization only when button clicked
             if optimize_clicked:
+                result_df = None
                 if solver_mode == "Closest FTP Match" and target_values:
                     available_players = [p for p in players if p["Name"] not in exclude_players]
-                    selected_team = []
-                    used_names = set()
+                    selected_team, used_names = [], set()
                     total_value = 0.0
                     for target in target_values:
                         candidates = sorted(
@@ -140,8 +135,13 @@ elif sport == "Cycling":
                     prob.solve()
                     result_df = pd.DataFrame([p for p in players if x[p["Name"]].value() == 1])
 
-            if result_df is not None:
+                if result_df is not None:
+                    st.session_state["result_df"] = result_df
+
+            # Always show team if exists
+            if "result_df" in st.session_state:
                 st.subheader("🎯 Optimized Team")
+                result_df = st.session_state["result_df"]
                 new_include, new_exclude = [], []
 
                 for _, row in result_df.iterrows():
@@ -158,11 +158,9 @@ elif sport == "Cycling":
                     elif choice == "✖ Exclude":
                         new_exclude.append(row["Name"])
 
-                # Update sidebar inputs
                 st.sidebar.markdown("---")
                 st.sidebar.markdown("🔁 Updated From Toggles:")
                 st.sidebar.write("✔ Include:", new_include)
                 st.sidebar.write("✖ Exclude:", new_exclude)
-                include_players[:] = new_include
-                exclude_players[:] = new_exclude
+
                 st.dataframe(result_df)
