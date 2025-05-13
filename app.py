@@ -65,17 +65,20 @@ elif sport == "Cycling":
 
                 if solver_mode == "Match Winning FTPS Profile" and template_file:
                     try:
-                        profile_template = pd.read_excel(template_file, usecols="D", skiprows=1, nrows=13, header=None)
-                        st.write("📊 Raw values from D2:D14:", profile_template.head(13))
-                        target_values = profile_template[0].dropna().astype(float).values
+                        profile_template = pd.read_excel(template_file, header=None)
+                        percentages = profile_template.iloc[1:14, 2].astype(float).values  # C2 to C14
 
-                        if len(target_values) != 13:
-                            st.error("❌ Template must contain 13 numeric values in cells D2 to D14.")
+                        if len(percentages) != 13:
+                            st.error("❌ Template must contain 13 percentage values in cells C2 to C14.")
                         else:
+                            target_values = [p * budget for p in percentages]
                             total_target = sum(target_values)
                             reference_profile = [v / total_target for v in target_values]
+
+                            st.write("📊 Target FTP values from percentages × budget:", target_values)
+                            st.write("📈 Normalized FTP distribution (reference profile):", reference_profile)
                     except Exception as e:
-                        st.error(f"Failed to load profile values from D2:D14: {e}")
+                        st.error(f"Failed to load percentages from C2:C14: {e}")
                         reference_profile = None
 
                 if solver_mode == "Match Winning FTPS Profile":
