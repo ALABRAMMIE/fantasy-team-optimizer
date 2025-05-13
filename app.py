@@ -68,18 +68,16 @@ elif sport == "Cycling":
 
                 if solver_mode == "Match Winning FTPS Profile":
                     reference_profile = None
-                    if template_file:
-                        try:
-                            profile_template = pd.read_excel(template_file)
-                            col_name = "Value per rider from distribution (D)"
-                            if col_name in profile_template.columns:
-                                target_values = profile_template[col_name].dropna().values
-                                total_target = sum(target_values)
-                                reference_profile = [v / total_target for v in target_values]
-                            else:
-                                st.error(f"Column '{col_name}' not found in the uploaded template.")
-                        except Exception as e:
-                            st.error(f"Failed to load template: {e}")
+if template_file:
+    try:
+        # Load fixed range D2:D14 from the first sheet
+        profile_template = pd.read_excel(template_file, usecols="D", skiprows=1, nrows=13, header=None)
+        target_values = profile_template[0].dropna().values
+        total_target = sum(target_values)
+        reference_profile = [v / total_target for v in target_values]
+    except Exception as e:
+        st.error(f"Failed to load profile values from D2:D14: {e}")
+        reference_profile = None
 
                     if reference_profile:
                         best_team = None
