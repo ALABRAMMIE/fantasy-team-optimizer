@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
-from pulp import LpProblem, LpMaximize, LpVariable, lpSum
+from pulp import LpProblem, LpMinimize, LpVariable, lpSum
 import random
 
 st.title("Fantasy Team Optimizer")
 
-# Sport options
 sport_options = [
     "-- Choose a sport --",
     "Cycling", "Speed Skating", "Formula 1", "Stock Exchange", "Tennis", "MotoGP", "Football",
@@ -89,10 +88,9 @@ elif sport == "Cycling":
                         for _ in range(50):  # try 50 randomizations
                             random.shuffle(players)
 
-                            prob = LpProblem("FantasyTeam", LpMaximize)
+                            prob = LpProblem("FantasyTeam", LpMinimize)
                             x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
-                            prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
                             prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
                             prob += lpSum(x[p["Name"]] for p in players) == team_size
 
@@ -103,15 +101,15 @@ elif sport == "Cycling":
 
                             prob.solve()
                             selected = [p for p in players if x[p["Name"]].value() == 1]
-
                             if len(selected) != team_size:
                                 continue
 
-                            selected_ftps = sorted([p["FTPS"] for p in selected], reverse=True)
-                            while len(selected_ftps) < 13:
-                                selected_ftps.append(0.0)
+                            player_ftps = sorted([p["FTPS"] for p in selected], reverse=True)
+                            target_sorted = sorted(target_values, reverse=True)
+                            while len(player_ftps) < 13:
+                                player_ftps.append(0.0)
 
-                            error = sum((selected_ftps[i] - target_values[i]) ** 2 for i in range(13))
+                            error = sum((player_ftps[i] - target_sorted[i]) ** 2 for i in range(13))
                             if error < best_error:
                                 best_error = error
                                 best_team = selected
@@ -128,7 +126,7 @@ elif sport == "Cycling":
 
                             st.write(f"**Total Value**: {round(best_result['value'], 2)}")
                             st.write(f"**Total FTPS**: {round(best_result['ftps'], 2)}")
-                            st.write(f"**Matching Score (lower is better)**: {round(best_result['error'], 2)}")
+                            st.write(f"**Total Matching Error (lower is better)**: {round(best_result['error'], 2)}")
 
                             st.download_button("📥 Download Team as CSV", result_df.to_csv(index=False), file_name="profile_optimized_team.csv")
                         else:
