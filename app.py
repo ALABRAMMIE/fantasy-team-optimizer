@@ -9,6 +9,7 @@ st.title("Fantasy Team Optimizer")
 
 sport_options = [
     "-- Choose a sport --",
+    "Athletics",
     "Cycling", "Speed Skating", "Formula 1", "Stock Exchange", "Tennis", "MotoGP", "Football",
     "Darts", "Cyclocross", "Golf", "Snooker", "Olympics", "Basketball", "Dakar Rally", "Skiing",
     "Rugby", "Biathlon", "Handball", "Cross Country", "Baseball", "Ice Hockey", "American Football",
@@ -16,6 +17,15 @@ sport_options = [
 ]
 
 sport = st.sidebar.selectbox("Select a sport", sport_options)
+
+# Reset session state if sport changes
+if "selected_sport" not in st.session_state:
+    st.session_state.selected_sport = sport
+elif sport != st.session_state.selected_sport:
+    for key in list(st.session_state.keys()):
+        if key not in ["selected_sport"]:
+            del st.session_state[key]
+    st.session_state.selected_sport = sport
 
 # Upload template once, early
 st.sidebar.markdown("### Upload Profile Template")
