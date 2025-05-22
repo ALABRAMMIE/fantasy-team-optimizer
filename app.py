@@ -119,7 +119,7 @@ if uploaded_file:
             except Exception as e:
                 st.error(f"Failed to read profile: {e}")
 
-        
+
 if optimize_clicked:
         st.info("🟡 Optimize button clicked.")
     if solver_mode == "Closest FTP Match" and not target_values:
@@ -169,7 +169,7 @@ if optimize_clicked:
                                 selected_team.append(p)
                                 used_names.add(p["Name"])
                                 break
-                
+
 if len(selected_team) < team_size:
     st.error(f"❌ Could not select a complete team. Only {len(selected_team)} players chosen.")
 else:
