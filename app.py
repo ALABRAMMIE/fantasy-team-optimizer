@@ -14,9 +14,35 @@ sport_options = [
     "Ski Jumping", "MMA", "Entertainment"
 ]
 
+
 sport = st.sidebar.selectbox("Select a sport", sport_options)
+
+# Detect available formats from the template file
+available_formats = []
+if template_file:
+    try:
+        xl = pd.ExcelFile(template_file)
+        available_formats = [s for s in xl.sheet_names if s.startswith(sport)]
+    except:
+        pass
+
+format_name = None
+if solver_mode == "Closest FTP Match" and template_file:
+    if available_formats:
+        format_name = st.sidebar.selectbox("Select Format", available_formats)
+    else:
+        st.sidebar.warning("No format sheets found for selected sport.")
+
 budget = st.sidebar.number_input("Max Budget", value=140.0)
-team_size = st.sidebar.number_input("Team Size", value=13, step=1)
+
+# Default team size
+team_size = 13
+if format_name:
+    match = re.search(r"\((\d+)\)", format_name)
+    if match:
+        team_size = int(match.group(1))
+team_size = st.sidebar.number_input("Team Size", value=team_size, step=1)
+
 
 solver_mode = st.sidebar.radio("Solver Objective", [
     "Maximize FTPS",
@@ -62,7 +88,7 @@ if uploaded_file:
         target_values = None
         if solver_mode == "Closest FTP Match" and template_file:
             try:
-                profile_sheet = pd.read_excel(template_file, sheet_name=sport, header=None)
+                profile_sheet = pd.read_excel(template_file, sheet_name=format_name, header=None)
                 raw_values = profile_sheet.iloc[:, 0].dropna().astype(float).tolist()
                 if len(raw_values) < team_size:
                     st.error(f"Target profile for {sport} has fewer than {team_size} values.")
@@ -133,7 +159,5 @@ if uploaded_file:
                 st.session_state.toggle_choices[row["Name"]] = choice
                 toggle_column.append(choice.split(" ")[0])  # symbol only
 
-            if "🔧" in result_df.columns:
-                result_df.drop(columns=["🔧"], inplace=True)
             result_df.insert(0, "🔧", toggle_column)
             st.dataframe(result_df)
