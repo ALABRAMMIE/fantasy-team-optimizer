@@ -90,7 +90,6 @@ if uploaded_file:
             edited_df["FTPS"] = 0
 
         if use_bracket_constraints and "Bracket" not in edited_df.columns:
-            st.warning("Bracket constraints are enabled, but no 'Bracket' column found in your data.")
             bracket_constraint_failed = True
 
         players = edited_df.to_dict("records")
@@ -128,22 +127,16 @@ if optimize_clicked:
             st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
         elif bracket_constraint_failed:
             st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
+        else:
     st.info("🟡 Optimize button clicked.")
     result_df = None
-        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
-        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
-        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
-        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
+    if solver_mode == "Closest FTP Match":
+    if not target_values:
+    elif bracket_constraint_failed:
     st.info("🟡 Optimize button clicked.")
     result_df = None
-        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
-    st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
-        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
-    st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
-    st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
-    st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
-    st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
-    st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
+    st.info("🟡 Optimize button clicked.")
+    result_df = None
     if solver_mode == "Closest FTP Match" and target_values:
     available_players = [p for p in players if p["Name"] not in exclude_players]
     selected_team, used_names = [], set()
