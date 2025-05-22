@@ -64,6 +64,7 @@ solver_mode = st.sidebar.radio("Solver Objective", [
 ])
 
 uploaded_file = st.file_uploader("Upload your Excel file (players)", type=["xlsx"])
+    optimize_clicked = st.sidebar.button("🚀 Optimize Team")
 
 if uploaded_file:
     bracket_constraint_failed = False
