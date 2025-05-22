@@ -16,22 +16,18 @@ sport_options = [
 
 
 sport = st.sidebar.selectbox("Select a sport", sport_options)
+template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="template")
 
-# Detect available formats from the template file
 available_formats = []
+format_name = None
 if template_file:
     try:
         xl = pd.ExcelFile(template_file)
         available_formats = [s for s in xl.sheet_names if s.startswith(sport)]
+        if solver_mode == "Closest FTP Match":
+            format_name = st.sidebar.selectbox("Select Format", available_formats)
     except:
-        pass
-
-format_name = None
-if solver_mode == "Closest FTP Match" and template_file:
-    if available_formats:
-        format_name = st.sidebar.selectbox("Select Format", available_formats)
-    else:
-        st.sidebar.warning("No format sheets found for selected sport.")
+        st.sidebar.warning("Failed to read sheet names from template.")
 
 budget = st.sidebar.number_input("Max Budget", value=140.0)
 
