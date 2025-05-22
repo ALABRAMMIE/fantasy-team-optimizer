@@ -119,7 +119,14 @@ if uploaded_file:
             except Exception as e:
                 st.error(f"Failed to read profile: {e}")
 
-        if optimize_clicked:
+        
+if optimize_clicked:
+    st.info("🟡 Optimize button clicked.")
+    if solver_mode == "Closest FTP Match" and not target_values:
+        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
+    elif solver_mode == "Closest FTP Match" and bracket_constraint_failed:
+        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
+
             result_df = None
             if solver_mode == "Closest FTP Match" and target_values:
                 available_players = [p for p in players if p["Name"] not in exclude_players]
@@ -162,7 +169,13 @@ if uploaded_file:
                                 selected_team.append(p)
                                 used_names.add(p["Name"])
                                 break
-                result_df = pd.DataFrame(selected_team)
+                
+if len(selected_team) < team_size:
+    st.error(f"❌ Could not select a complete team. Only {len(selected_team)} players chosen.")
+else:
+    result_df = pd.DataFrame(selected_team)
+    st.session_state["result_df"] = result_df
+
                 st.session_state["result_df"] = result_df
 
         if "result_df" in st.session_state:
