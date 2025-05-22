@@ -121,7 +121,7 @@ if uploaded_file:
 
         
 if optimize_clicked:
-    st.info("🟡 Optimize button clicked.")
+        st.info("🟡 Optimize button clicked.")
     if solver_mode == "Closest FTP Match" and not target_values:
         st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
     elif solver_mode == "Closest FTP Match" and bracket_constraint_failed:
