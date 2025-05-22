@@ -64,7 +64,7 @@ solver_mode = st.sidebar.radio("Solver Objective", [
 ])
 
 uploaded_file = st.file_uploader("Upload your Excel file (players)", type=["xlsx"])
-    optimize_clicked = st.sidebar.button("🚀 Optimize Team")
+optimize_clicked = st.sidebar.button("🚀 Optimize Team")
 
 if uploaded_file:
     bracket_constraint_failed = False
@@ -105,7 +105,7 @@ if uploaded_file:
         include_players = st.sidebar.multiselect("Players to INCLUDE", edited_df["Name"], default=default_includes)
         exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited_df["Name"], default=default_excludes)
 
-        optimize_clicked = st.sidebar.button("🚀 Optimize Team")
+optimize_clicked = st.sidebar.button("🚀 Optimize Team")
 
         target_values = None
         if solver_mode == "Closest FTP Match" and template_file and format_name:
