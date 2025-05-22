@@ -107,8 +107,8 @@ if uploaded_file:
 
 optimize_clicked = st.sidebar.button("🚀 Optimize Team")
 
-        target_values = None
-        if solver_mode == "Closest FTP Match" and template_file and format_name:
+target_values = None
+if solver_mode == "Closest FTP Match" and template_file and format_name:
             try:
                 profile_sheet = pd.read_excel(template_file, sheet_name=format_name, header=None)
                 raw_values = profile_sheet.iloc[:, 0].dropna()
@@ -123,7 +123,7 @@ optimize_clicked = st.sidebar.button("🚀 Optimize Team")
 if optimize_clicked:
     st.info("🟡 Optimize button clicked.")
     result_df = None
-    if solver_mode == "Closest FTP Match":
+if solver_mode == "Closest FTP Match":
         if not target_values:
             st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
         elif bracket_constraint_failed:
@@ -171,7 +171,7 @@ if optimize_clicked:
             else:
                 st.error(f"❌ Could not select a complete team. Only {len(selected_team)} players chosen.")
             result_df = None
-            if solver_mode == "Closest FTP Match" and target_values:
+if solver_mode == "Closest FTP Match" and target_values:
                 available_players = [p for p in players if p["Name"] not in exclude_players]
                 selected_team, used_names = [], set()
 
