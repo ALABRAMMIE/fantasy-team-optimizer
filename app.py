@@ -215,19 +215,19 @@ if solver_mode == "Closest FTP Match" and target_values:
                 result_df = pd.DataFrame(selected_team)
                 st.session_state["result_df"] = result_df
 
-        if "result_df" in st.session_state:
-            result_df = st.session_state["result_df"]
-            st.subheader("🎯 Optimized Team")
-            toggle_column = []
-            for _, row in result_df.iterrows():
-                default = st.session_state.toggle_choices.get(row["Name"], "– Neutral")
-                choice = st.radio(
-                    f"{row['Name']}", ["✔ Include", "✖ Exclude", "– Neutral"],
-                    horizontal=True,
-                    key=f"toggle_{row['Name']}",
-                    index=["✔ Include", "✖ Exclude", "– Neutral"].index(default)
-                )
-                st.session_state.toggle_choices[row["Name"]] = choice
+if "result_df" in st.session_state:
+result_df = st.session_state["result_df"]
+st.subheader("🎯 Optimized Team")
+toggle_column = []
+for _, row in result_df.iterrows():
+default = st.session_state.toggle_choices.get(row["Name"], "– Neutral")
+choice = st.radio(
+f"{row['Name']}", ["✔ Include", "✖ Exclude", "– Neutral"],
+horizontal=True,
+key=f"toggle_{row['Name']}",
+index=["✔ Include", "✖ Exclude", "– Neutral"].index(default)
+)
+st.session_state.toggle_choices[row["Name"]] = choice
                 toggle_column.append(choice.split(" ")[0])
 
             if "🔧" in result_df.columns:
