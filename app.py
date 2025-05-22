@@ -216,7 +216,7 @@ if solver_mode == "Closest FTP Match" and target_values:
                 st.session_state["result_df"] = result_df
 
 if "result_df" in st.session_state:
-result_df = st.session_state["result_df"]
+    result_df = st.session_state["result_df"]
 st.subheader("🎯 Optimized Team")
 toggle_column = []
 for _, row in result_df.iterrows():
