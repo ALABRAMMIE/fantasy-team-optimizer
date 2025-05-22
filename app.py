@@ -9,11 +9,10 @@ st.title("Fantasy Team Optimizer")
 
 sport_options = [
     "-- Choose a sport --",
-    "Athletics",
     "Cycling", "Speed Skating", "Formula 1", "Stock Exchange", "Tennis", "MotoGP", "Football",
     "Darts", "Cyclocross", "Golf", "Snooker", "Olympics", "Basketball", "Dakar Rally", "Skiing",
     "Rugby", "Biathlon", "Handball", "Cross Country", "Baseball", "Ice Hockey", "American Football",
-    "Ski Jumping", "MMA", "Entertainment"
+    "Ski Jumping", "MMA", "Entertainment", "Athletics"
 ]
 
 sport = st.sidebar.selectbox("Select a sport", sport_options)
@@ -43,6 +42,9 @@ if template_file:
     except:
         st.sidebar.warning("Unable to read sheets from the uploaded template.")
 
+# Bracket constraints toggle
+use_bracket_constraints = st.sidebar.checkbox("Use Bracket Constraints")
+
 # Budget & team size
 budget = st.sidebar.number_input("Max Budget", value=140.0)
 
@@ -64,14 +66,19 @@ solver_mode = st.sidebar.radio("Solver Objective", [
 uploaded_file = st.file_uploader("Upload your Excel file (players)", type=["xlsx"])
 
 if uploaded_file:
+    bracket_constraint_failed = False
     df = pd.read_excel(uploaded_file)
     if not {"Name", "Value"}.issubset(df.columns):
         st.error("Uploaded file must include at least 'Name' and 'Value' columns.")
     else:
         st.subheader("📋 Edit Player Data")
         editable_cols = ["Name", "Value"]
+        if "Position" in df.columns:
+            editable_cols.append("Position")
         if "Rank FTPS" in df.columns:
             editable_cols.append("Rank FTPS")
+        if "Bracket" in df.columns:
+            editable_cols.append("Bracket")
         edited_df = st.data_editor(df[editable_cols], use_container_width=True)
 
         if "FTPS" not in edited_df.columns and "Rank FTPS" in edited_df.columns:
@@ -81,6 +88,10 @@ if uploaded_file:
             )
         elif "FTPS" not in edited_df.columns:
             edited_df["FTPS"] = 0
+
+        if use_bracket_constraints and "Bracket" not in edited_df.columns:
+            st.warning("Bracket constraints are enabled, but no 'Bracket' column found in your data.")
+            bracket_constraint_failed = True
 
         players = edited_df.to_dict("records")
 
@@ -113,46 +124,45 @@ if uploaded_file:
             if solver_mode == "Closest FTP Match" and target_values:
                 available_players = [p for p in players if p["Name"] not in exclude_players]
                 selected_team, used_names = [], set()
-                for target in target_values:
-                    candidates = sorted(
-                        [p for p in available_players if p["Name"] not in used_names],
-                        key=lambda p: abs(p["Value"] - target)
-                    )
-                    for p in candidates:
-                        if p["Name"] not in used_names:
+
+                if use_bracket_constraints and not bracket_constraint_failed:
+                    bracket_used = set()
+                    for p in available_players:
+                        if "Bracket" in p and p["Name"] not in used_names:
+                            if p["Bracket"] in bracket_used:
+                                continue
+                            bracket_used.add(p["Bracket"])
                             selected_team.append(p)
                             used_names.add(p["Name"])
-                            break
-                if len(selected_team) == team_size:
-                    result_df = pd.DataFrame(selected_team)
-                    st.session_state["result_df"] = result_df
+                    for target in target_values[len(selected_team):]:
+                        candidates = sorted(
+                            [p for p in available_players if p["Name"] not in used_names],
+                            key=lambda p: abs(p["Value"] - target)
+                        )
+                        for p in candidates:
+                            if p["Name"] not in used_names and (not use_bracket_constraints or p["Bracket"] not in bracket_used):
+                                selected_team.append(p)
+                                used_names.add(p["Name"])
+                                if use_bracket_constraints:
+                                    bracket_used.add(p["Bracket"])
+                                break
                 else:
-                    st.error("Could not form a complete team.")
-            elif solver_mode == "Maximize FTPS":
-                prob = LpProblem("MaximizeFTPS", LpMaximize)
-                x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
-                prob += lpSum(x[p["Name"]] * p.get("FTPS", 0) for p in players)
-                prob += lpSum(x[p["Name"]] for p in players) == team_size
-                prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
-                for name in include_players:
-                    prob += x[name] == 1
-                for name in exclude_players:
-                    prob += x[name] == 0
-                prob.solve()
-                result_df = pd.DataFrame([p for p in players if x[p["Name"]].value() == 1])
-                st.session_state["result_df"] = result_df
-            elif solver_mode == "Maximize Budget Usage":
-                prob = LpProblem("MaximizeBudget", LpMaximize)
-                x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
-                prob += lpSum(x[p["Name"]] * p["Value"] for p in players)
-                prob += lpSum(x[p["Name"]] for p in players) == team_size
-                prob += lpSum(x[p["Name"]] * p["Value"] for p in players) <= budget
-                for name in include_players:
-                    prob += x[name] == 1
-                for name in exclude_players:
-                    prob += x[name] == 0
-                prob.solve()
-                result_df = pd.DataFrame([p for p in players if x[p["Name"]].value() == 1])
+                    for name in include_players:
+                        force = [p for p in available_players if p["Name"] == name]
+                        if force:
+                            selected_team.append(force[0])
+                            used_names.add(name)
+                    for target in target_values[len(selected_team):]:
+                        candidates = sorted(
+                            [p for p in available_players if p["Name"] not in used_names],
+                            key=lambda p: abs(p["Value"] - target)
+                        )
+                        for p in candidates:
+                            if p["Name"] not in used_names:
+                                selected_team.append(p)
+                                used_names.add(p["Name"])
+                                break
+                result_df = pd.DataFrame(selected_team)
                 st.session_state["result_df"] = result_df
 
         if "result_df" in st.session_state:
