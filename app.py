@@ -122,14 +122,16 @@ if uploaded_file:
 
 if optimize_clicked:
     st.info("🟡 Optimize button clicked.")
+    result_df = None
     if solver_mode == "Closest FTP Match" and not target_values:
         st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
     elif solver_mode == "Closest FTP Match" and bracket_constraint_failed:
         st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
         st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
         st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
+        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
+        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
 
-            result_df = None
             if solver_mode == "Closest FTP Match" and target_values:
                 available_players = [p for p in players if p["Name"] not in exclude_players]
                 selected_team, used_names = [], set()
