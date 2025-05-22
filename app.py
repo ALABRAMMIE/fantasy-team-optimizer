@@ -124,16 +124,18 @@ if optimize_clicked:
     st.info("🟡 Optimize button clicked.")
     result_df = None
     if solver_mode == "Closest FTP Match" and not target_values:
-        pass  # prevent empty if block
+        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
         st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
     elif solver_mode == "Closest FTP Match" and bracket_constraint_failed:
+        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
         st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
     st.info("🟡 Optimize button clicked.")
     result_df = None
     if solver_mode == "Closest FTP Match" and not target_values:
-        pass  # prevent empty if block
+        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
     st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
     elif solver_mode == "Closest FTP Match" and bracket_constraint_failed:
+        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
     st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
     st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
     st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
