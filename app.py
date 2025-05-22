@@ -71,6 +71,7 @@ if uploaded_file:
     if not {"Name", "Value"}.issubset(df.columns):
         st.error("Uploaded file must include at least 'Name' and 'Value' columns.")
     else:
+    pass  # placeholder block
         st.subheader("📋 Edit Player Data")
         editable_cols = ["Name", "Value"]
         if "Position" in df.columns:
@@ -114,6 +115,7 @@ if uploaded_file:
                 if len(raw_values) < team_size:
                     st.error(f"Target profile for {format_name} has fewer than {team_size} values.")
                 else:
+    pass  # placeholder block
                     target_values = raw_values[:team_size]
             except Exception as e:
                 st.error(f"Failed to read profile: {e}")
@@ -128,6 +130,7 @@ if optimize_clicked:
         elif bracket_constraint_failed:
             st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
         else:
+    pass  # placeholder block
     st.info("🟡 Optimize button clicked.")
     result_df = None
     if solver_mode == "Closest FTP Match":
@@ -162,6 +165,7 @@ if optimize_clicked:
     bracket_used.add(p["Bracket"])
     break
     else:
+    pass  # placeholder block
     for name in include_players:
     force = [p for p in available_players if p["Name"] == name]
     if force:
@@ -180,6 +184,7 @@ if optimize_clicked:
     if len(selected_team) < team_size:
     st.error(f"❌ Could not select a complete team. Only {len(selected_team)} players chosen.")
 else:
+    pass  # placeholder block
     result_df = pd.DataFrame(selected_team)
     st.session_state["result_df"] = result_df
 
