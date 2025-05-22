@@ -17,9 +17,9 @@ sport_options = [
 
 
 sport = st.sidebar.selectbox("Select a sport", sport_options)
-template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="profile_template_unique")
+template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="profile_template")
 
-template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="template")
+template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="profile_template")
 
 available_formats = []
 format_name = None
@@ -50,7 +50,7 @@ solver_mode = st.sidebar.radio("Solver Objective", [
 ])
 
 uploaded_file = st.file_uploader("Upload your Excel file (players)", type=["xlsx"])
-template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="template")
+template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="profile_template")
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
