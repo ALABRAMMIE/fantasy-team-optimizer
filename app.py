@@ -133,5 +133,7 @@ if uploaded_file:
                 st.session_state.toggle_choices[row["Name"]] = choice
                 toggle_column.append(choice.split(" ")[0])  # symbol only
 
+            if "🔧" in result_df.columns:
+                result_df.drop(columns=["🔧"], inplace=True)
             result_df.insert(0, "🔧", toggle_column)
             st.dataframe(result_df)
