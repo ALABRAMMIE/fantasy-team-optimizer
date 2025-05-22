@@ -127,54 +127,57 @@ if optimize_clicked:
         st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
     elif solver_mode == "Closest FTP Match" and bracket_constraint_failed:
         st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
-        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
-        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
-        st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
-        st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
-
-            if solver_mode == "Closest FTP Match" and target_values:
-                available_players = [p for p in players if p["Name"] not in exclude_players]
-                selected_team, used_names = [], set()
-
-                if use_bracket_constraints and not bracket_constraint_failed:
-                    bracket_used = set()
-                    for p in available_players:
-                        if "Bracket" in p and p["Name"] not in used_names:
-                            if p["Bracket"] in bracket_used:
-                                continue
-                            bracket_used.add(p["Bracket"])
-                            selected_team.append(p)
-                            used_names.add(p["Name"])
-                    for target in target_values[len(selected_team):]:
-                        candidates = sorted(
-                            [p for p in available_players if p["Name"] not in used_names],
-                            key=lambda p: abs(p["Value"] - target)
-                        )
-                        for p in candidates:
-                            if p["Name"] not in used_names and (not use_bracket_constraints or p["Bracket"] not in bracket_used):
-                                selected_team.append(p)
-                                used_names.add(p["Name"])
-                                if use_bracket_constraints:
-                                    bracket_used.add(p["Bracket"])
-                                break
-                else:
-                    for name in include_players:
-                        force = [p for p in available_players if p["Name"] == name]
-                        if force:
-                            selected_team.append(force[0])
-                            used_names.add(name)
-                    for target in target_values[len(selected_team):]:
-                        candidates = sorted(
-                            [p for p in available_players if p["Name"] not in used_names],
-                            key=lambda p: abs(p["Value"] - target)
-                        )
-                        for p in candidates:
-                            if p["Name"] not in used_names:
-                                selected_team.append(p)
-                                used_names.add(p["Name"])
-                                break
-
-if len(selected_team) < team_size:
+    st.info("🟡 Optimize button clicked.")
+    result_df = None
+    if solver_mode == "Closest FTP Match" and not target_values:
+    st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
+    elif solver_mode == "Closest FTP Match" and bracket_constraint_failed:
+    st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
+    st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
+    st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
+    st.warning("⚠️ Target values are not loaded. Please check your format sheet or template.")
+    st.warning("⚠️ Bracket constraints are enabled, but bracket column is missing.")
+    if solver_mode == "Closest FTP Match" and target_values:
+    available_players = [p for p in players if p["Name"] not in exclude_players]
+    selected_team, used_names = [], set()
+    if use_bracket_constraints and not bracket_constraint_failed:
+    bracket_used = set()
+    for p in available_players:
+    if "Bracket" in p and p["Name"] not in used_names:
+    if p["Bracket"] in bracket_used:
+    continue
+    bracket_used.add(p["Bracket"])
+    selected_team.append(p)
+    used_names.add(p["Name"])
+    for target in target_values[len(selected_team):]:
+    candidates = sorted(
+    [p for p in available_players if p["Name"] not in used_names],
+    key=lambda p: abs(p["Value"] - target)
+    )
+    for p in candidates:
+    if p["Name"] not in used_names and (not use_bracket_constraints or p["Bracket"] not in bracket_used):
+    selected_team.append(p)
+    used_names.add(p["Name"])
+    if use_bracket_constraints:
+    bracket_used.add(p["Bracket"])
+    break
+    else:
+    for name in include_players:
+    force = [p for p in available_players if p["Name"] == name]
+    if force:
+    selected_team.append(force[0])
+    used_names.add(name)
+    for target in target_values[len(selected_team):]:
+    candidates = sorted(
+    [p for p in available_players if p["Name"] not in used_names],
+    key=lambda p: abs(p["Value"] - target)
+    )
+    for p in candidates:
+    if p["Name"] not in used_names:
+    selected_team.append(p)
+    used_names.add(p["Name"])
+    break
+    if len(selected_team) < team_size:
     st.error(f"❌ Could not select a complete team. Only {len(selected_team)} players chosen.")
 else:
     result_df = pd.DataFrame(selected_team)
