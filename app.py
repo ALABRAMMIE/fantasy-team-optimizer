@@ -4,6 +4,7 @@ import pandas as pd
 from pulp import LpProblem, LpMaximize, LpVariable, lpSum
 import random
 import re
+from io import BytesIO
 
 st.title("Fantasy Team Optimizer")
 
@@ -18,6 +19,7 @@ sport_options = [
 
 sport = st.sidebar.selectbox("Select a sport", sport_options)
 
+# Reset state on sport change
 if "selected_sport" not in st.session_state:
     st.session_state.selected_sport = sport
 elif sport != st.session_state.selected_sport:
@@ -98,7 +100,6 @@ if uploaded_file:
         include_players = st.sidebar.multiselect("Players to INCLUDE", edited_df["Name"], default=default_inc)
         exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited_df["Name"], default=default_exc)
 
-        # Prepare target values
         target_values = None
         if solver_mode=="Closest FTP Match" and template_file and format_name:
             try:
@@ -140,49 +141,59 @@ if uploaded_file:
                     add_bracket_constraints(prob, x)
                     for n in include_players: prob += x[n]==1
                     for n in exclude_players: prob += x[n]==0
-                    for t in prev_teams:
-                        prob += lpSum(x[name] for name in t) <= team_size-1
+                    for t in prev_teams: prob += lpSum(x[name] for name in t)<=team_size-1
                     prob.solve()
-                    sel = [p for p in players if x[p["Name"]].value()==1]
+                    sel=[p for p in players if x[p["Name"]].value()==1]
                     prev_teams.append([p["Name"] for p in sel])
                     all_teams.append(sel)
 
             elif solver_mode=="Closest FTP Match":
-                seen = {}
-                for _ in range(num_teams*50):
+                seen={}
+                attempts=num_teams*100
+                for _ in range(attempts):
                     random.shuffle(players)
-                    avail = [p for p in players if p["Name"] not in exclude_players]
-                    sel, used = [], set()
+                    avail=[p for p in players if p["Name"] not in exclude_players]
+                    sel,used=[],set()
                     for n in include_players:
                         for p in avail:
                             if p["Name"]==n:
                                 sel.append(p); used.add(n); break
                     if use_bracket_constraints:
-                        br_used = set()
+                        br_used=set()
                         for p in avail:
-                            b = p.get("Bracket")
+                            b=p.get("Bracket")
                             if b and p["Name"] not in used and b not in br_used:
                                 sel.append(p); used.add(p["Name"]); br_used.add(b)
                                 if len(sel)==team_size: break
                     for tgt in target_values[len(sel):]:
-                        cands = sorted([p for p in avail if p["Name"] not in used],
-                                       key=lambda x: abs(x["Value"]-tgt))
+                        cands=sorted([p for p in avail if p["Name"] not in used],key=lambda x:abs(x["Value"]-tgt))
                         if cands:
                             c=cands[0]; sel.append(c); used.add(c["Name"])
                     if len(sel)==team_size:
-                        err = sum((sel[i]["Value"]-target_values[i])**2 for i in range(team_size))
-                        key = tuple(p["Name"] for p in sel)
+                        err=sum((sel[i]["Value"]-target_values[i])**2 for i in range(team_size))
+                        key=tuple(p["Name"] for p in sel)
                         if key not in seen or err<seen[key][0]:
-                            seen[key] = (err, sel)
-                best = sorted(seen.values(), key=lambda x: x[0])[:num_teams]
-                all_teams = [team for err, team in best]
+                            seen[key]=(err,sel)
+                    if len(seen)>=num_teams: break
+                best=sorted(seen.values(),key=lambda x:x[0])[:num_teams]
+                all_teams=[team for err,team in best]
+
+            # Show and prepare download
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                for idx, team in enumerate(all_teams):
+                    pd.DataFrame(team).to_excel(writer, sheet_name=f"Team{idx+1}", index=False)
+                writer.save()
+            output.seek(0)
 
             for idx, team in enumerate(all_teams):
-                df_t = pd.DataFrame(team)
+                df_t=pd.DataFrame(team)
                 with st.expander(f"Team {idx+1}"):
                     st.dataframe(df_t)
-                    st.download_button(
-                        f"Download Team {idx+1}",
-                        df_t.to_csv(index=False),
-                        file_name=f"team_{idx+1}.csv"
-                    )
+
+            st.download_button(
+                "📥 Download All Teams (Excel)",
+                output,
+                file_name="all_teams.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
