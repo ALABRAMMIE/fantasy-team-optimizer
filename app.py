@@ -5,6 +5,7 @@ from pulp import LpProblem, LpMaximize, LpVariable, lpSum
 import random
 import re
 from io import BytesIO
+import math
 
 st.title("Fantasy Team Optimizer")
 
@@ -16,9 +17,9 @@ sport_options = [
     "Handball", "Cross Country", "Baseball", "Ice Hockey", "American Football",
     "Ski Jumping", "MMA", "Entertainment", "Athletics"
 ]
-
 sport = st.sidebar.selectbox("Select a sport", sport_options)
 
+# Reset state on sport change
 if "selected_sport" not in st.session_state:
     st.session_state.selected_sport = sport
 elif sport != st.session_state.selected_sport:
@@ -27,12 +28,14 @@ elif sport != st.session_state.selected_sport:
             del st.session_state[key]
     st.session_state.selected_sport = sport
 
+# Upload profile template
 st.sidebar.markdown("### Upload Profile Template")
 template_file = st.sidebar.file_uploader(
     "Upload Target Profile Template (multi-sheet)",
     type=["xlsx"], key="template_upload_key"
 )
 
+# Detect formats
 available_formats = []
 format_name = None
 if template_file:
@@ -44,8 +47,8 @@ if template_file:
     except:
         st.sidebar.warning("⚠️ Unable to read sheets from template.")
 
+# Options
 use_bracket_constraints = st.sidebar.checkbox("Use Bracket Constraints")
-
 budget = st.sidebar.number_input("Max Budget", value=140.0)
 default_team_size = 13
 if format_name:
@@ -53,12 +56,15 @@ if format_name:
     if m:
         default_team_size = int(m.group(1))
 team_size = st.sidebar.number_input("Team Size", value=default_team_size, step=1)
-
 solver_mode = st.sidebar.radio("Solver Objective", [
     "Maximize FTPS", "Maximize Budget Usage", "Closest FTP Match"
 ])
-
-num_teams = st.sidebar.number_input("Number of Teams", min_value=1, max_value=10, value=1, step=1)
+num_teams = st.sidebar.number_input("Number of Teams", min_value=1, max_value=20, value=1, step=1)
+# Frequency constraint
+max_freq_pct = st.sidebar.number_input(
+    "Max Player Frequency (%)", min_value=0, max_value=100, value=100, step=5
+)
+max_occurrences = math.floor(max_freq_pct/100 * num_teams)
 
 uploaded_file = st.file_uploader("Upload your Excel file (players)", type=["xlsx"])
 if uploaded_file:
@@ -68,22 +74,19 @@ if uploaded_file:
     else:
         st.subheader("📋 Edit Player Data")
         editable = ["Name", "Value"]
-        if "Position" in df.columns:
-            editable.append("Position")
-        if "Rank FTPS" in df.columns:
-            editable.append("Rank FTPS")
-        if "Bracket" in df.columns:
-            editable.append("Bracket")
+        if "Position" in df.columns: editable.append("Position")
+        if "Rank FTPS" in df.columns: editable.append("Rank FTPS")
+        if "Bracket" in df.columns: editable.append("Bracket")
         edited_df = st.data_editor(df[editable], use_container_width=True)
 
+        # Compute FTPS
         if "Rank FTPS" in edited_df.columns:
             rk = {r: max(0, 150 - (r - 1) * 5) for r in range(1, 31)}
-            edited_df["FTPS"] = edited_df["Rank FTPS"].apply(
-                lambda x: rk.get(int(x), 0) if pd.notnull(x) else 0
-            )
+            edited_df["FTPS"] = edited_df["Rank FTPS"].apply(lambda x: rk.get(int(x), 0) if pd.notnull(x) else 0)
         else:
             edited_df["FTPS"] = 0
 
+        # Bracket check
         bracket_fail = False
         if use_bracket_constraints and "Bracket" not in edited_df.columns:
             st.warning("⚠️ Bracket enabled but no 'Bracket' column found.")
@@ -91,6 +94,7 @@ if uploaded_file:
 
         players = edited_df.to_dict("records")
 
+        # toggles state
         if "toggle_choices" not in st.session_state:
             st.session_state.toggle_choices = {}
 
@@ -99,6 +103,7 @@ if uploaded_file:
         include_players = st.sidebar.multiselect("Players to INCLUDE", edited_df["Name"], default=default_inc)
         exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited_df["Name"], default=default_exc)
 
+        # Prepare target values
         target_values = None
         if solver_mode=="Closest FTP Match" and template_file and format_name:
             try:
@@ -113,6 +118,7 @@ if uploaded_file:
                 st.error(f"❌ Failed to read profile: {e}")
 
         if st.sidebar.button("🚀 Optimize Teams"):
+            frequency = {p["Name"]: 0 for p in players}
             all_teams = []
 
             def add_bracket_constraints(prob, x_vars):
@@ -125,70 +131,100 @@ if uploaded_file:
                     for vars_list in brackets.values():
                         prob += lpSum(vars_list) <= 1
 
+            # Generate LP-based teams
             if solver_mode in ["Maximize FTPS", "Maximize Budget Usage"]:
                 prev_teams = []
                 for _ in range(num_teams):
                     prob = (LpProblem("MaxFTPS", LpMaximize) if solver_mode=="Maximize FTPS"
                             else LpProblem("MaxBudget", LpMaximize))
                     x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+
+                    # Objective
                     if solver_mode=="Maximize FTPS":
-                        prob += lpSum(x[p["Name"]]*p["FTPS"] for p in players)
+                        prob += lpSum(x[n]*next(p["FTPS"] for p in players if p["Name"]==n) for n in x)
                     else:
-                        prob += lpSum(x[p["Name"]]*p["Value"] for p in players)
-                    prob += lpSum(x[p["Name"]] for p in players)==team_size
-                    prob += lpSum(x[p["Name"]]*p["Value"] for p in players)<=budget
+                        prob += lpSum(x[n]*next(p["Value"] for p in players if p["Name"]==n) for n in x)
+
+                    # Constraints
+                    prob += lpSum(x[n] for n in x)==team_size
+                    prob += lpSum(x[n]*next(p["Value"] for p in players if p["Name"]==n) for n in x)<=budget
                     add_bracket_constraints(prob, x)
+
+                    # Include/exclude
                     for n in include_players: prob += x[n]==1
                     for n in exclude_players: prob += x[n]==0
-                    for t in prev_teams: prob += lpSum(x[name] for name in t)<=team_size-1
-                    prob.solve()
-                    sel=[p for p in players if x[p["Name"]].value()==1]
-                    prev_teams.append([p["Name"] for p in sel])
-                    all_teams.append(sel)
 
+                    # Frequency constraint
+                    for n, count in frequency.items():
+                        if n not in include_players and n not in exclude_players and count >= max_occurrences:
+                            prob += x[n]==0
+
+                    # Avoid exact prior teams
+                    for t in prev_teams:
+                        prob += lpSum(x[name] for name in t) <= team_size-1
+
+                    prob.solve()
+                    sel = [n for n in x if x[n].value()==1]
+                    prev_teams.append(sel)
+                    for n in sel:
+                        frequency[n] += 1
+                    all_teams.append([p for p in players if p["Name"] in sel])
+
+            # Generate greedy teams
             elif solver_mode=="Closest FTP Match":
-                seen={}
-                attempts=num_teams*100
+                seen = {}
+                attempts = num_teams * 100
                 for _ in range(attempts):
                     random.shuffle(players)
-                    avail=[p for p in players if p["Name"] not in exclude_players]
-                    sel,used=[],set()
+                    avail = [p for p in players if p["Name"] not in exclude_players]
+                    sel, used, br_used = [], set(), set()
                     for n in include_players:
                         for p in avail:
                             if p["Name"]==n:
-                                sel.append(p); used.add(n); break
+                                sel.append(p)
+                                used.add(n)
+                                break
                     if use_bracket_constraints:
-                        br_used=set()
                         for p in avail:
-                            b=p.get("Bracket")
+                            b = p.get("Bracket")
                             if b and p["Name"] not in used and b not in br_used:
-                                sel.append(p); used.add(p["Name"]); br_used.add(b)
-                                if len(sel)==team_size: break
+                                sel.append(p)
+                                used.add(p["Name"])
+                                br_used.add(b)
+                                break
                     for tgt in target_values[len(sel):]:
-                        cands=sorted([p for p in avail if p["Name"] not in used], key=lambda x:abs(x["Value"]-tgt))
+                        cands=sorted(
+                            [p for p in avail if p["Name"] not in used and (p["Name"] in include_players or p["Name"] in exclude_players or frequency[p["Name"]] < max_occurrences)],
+                            key=lambda x: abs(x["Value"]-tgt)
+                        )
                         if cands:
-                            c=cands[0]; sel.append(c); used.add(c["Name"])
+                            c = cands[0]
+                            sel.append(c)
+                            used.add(c["Name"])
                     if len(sel)==team_size:
-                        err=sum((sel[i]["Value"]-target_values[i])**2 for i in range(team_size))
-                        key=tuple(p["Name"] for p in sel)
-                        if key not in seen or err<seen[key][0]:
-                            seen[key]=(err,sel)
-                    if len(seen)>=num_teams: break
-                best=sorted(seen.values(),key=lambda x:x[0])[:num_teams]
-                all_teams=[team for err,team in best]
+                        err = sum((sel[i]["Value"]-target_values[i])**2 for i in range(team_size))
+                        key = tuple(p["Name"] for p in sel)
+                        if key not in seen or err < seen[key][0]:
+                            seen[key] = (err, sel)
+                    if len(seen) >= num_teams:
+                        break
+                best = sorted(seen.values(), key=lambda x: x[0])[:num_teams]
+                for _, team in best:
+                    for p in team:
+                        frequency[p["Name"]] += 1
+                    all_teams.append(team)
 
-            # Create Excel in-memory with openpyxl
+            # Output Excel
             output = BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 for idx, team in enumerate(all_teams):
                     pd.DataFrame(team).to_excel(writer, sheet_name=f"Team{idx+1}", index=False)
             output.seek(0)
 
+            # Display and download
             for idx, team in enumerate(all_teams):
-                df_t=pd.DataFrame(team)
                 with st.expander(f"Team {idx+1}"):
-                    st.dataframe(df_t)
-
+                    st.dataframe(pd.DataFrame(team))
             st.download_button(
                 "📥 Download All Teams (Excel)",
                 output,
