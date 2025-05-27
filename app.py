@@ -19,7 +19,6 @@ sport_options = [
 
 sport = st.sidebar.selectbox("Select a sport", sport_options)
 
-# Reset state on sport change
 if "selected_sport" not in st.session_state:
     st.session_state.selected_sport = sport
 elif sport != st.session_state.selected_sport:
@@ -166,7 +165,7 @@ if uploaded_file:
                                 sel.append(p); used.add(p["Name"]); br_used.add(b)
                                 if len(sel)==team_size: break
                     for tgt in target_values[len(sel):]:
-                        cands=sorted([p for p in avail if p["Name"] not in used],key=lambda x:abs(x["Value"]-tgt))
+                        cands=sorted([p for p in avail if p["Name"] not in used], key=lambda x:abs(x["Value"]-tgt))
                         if cands:
                             c=cands[0]; sel.append(c); used.add(c["Name"])
                     if len(sel)==team_size:
@@ -178,12 +177,11 @@ if uploaded_file:
                 best=sorted(seen.values(),key=lambda x:x[0])[:num_teams]
                 all_teams=[team for err,team in best]
 
-            # Show and prepare download
+            # Create Excel in-memory with openpyxl
             output = BytesIO()
-            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 for idx, team in enumerate(all_teams):
                     pd.DataFrame(team).to_excel(writer, sheet_name=f"Team{idx+1}", index=False)
-                writer.save()
             output.seek(0)
 
             for idx, team in enumerate(all_teams):
