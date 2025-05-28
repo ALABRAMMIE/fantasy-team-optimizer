@@ -65,7 +65,7 @@ solver_mode = st.sidebar.radio(
 )
 
 num_teams = st.sidebar.number_input(
-    "Number of Teams", min_value=1, max_value=20,
+    "Number of Teams", min_value=1, max_value=25,
     value=1, step=1
 )
 diff_count = st.sidebar.number_input(
