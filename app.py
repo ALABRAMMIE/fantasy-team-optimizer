@@ -97,23 +97,21 @@ else:
         bracket_fail = True
 
     players = edited.to_dict("records")
-    if "toggle_choices" not in st.session_state:
-        st.session_state.toggle_choices = {}
-    default_inc = [n for n,v in st.session_state.toggle_choices.items() if v=="✔"]
-    default_exc = [n for n,v in st.session_state.toggle_choices.items() if v=="✖"]
+    default_inc = [n for n, v in st.session_state.get("toggle_choices", {}).items() if v == "✔"]
+    default_exc = [n for n, v in st.session_state.get("toggle_choices", {}).items() if v == "✖"]
 
     include_players = st.sidebar.multiselect("Players to INCLUDE",
                                              edited["Name"], default=default_inc)
     exclude_players = st.sidebar.multiselect("Players to EXCLUDE",
                                              edited["Name"], default=default_exc)
 
-    # prepare target_values for Closest FTP Match
     target_values = None
-    if solver_mode=="Closest FTP Match" and template_file and format_name:
+    if solver_mode == "Closest FTP Match" and template_file and format_name:
         try:
             prof = pd.read_excel(template_file, sheet_name=format_name, header=None)
-            raw = prof.iloc[:,0].dropna().tolist()
-            vals = [float(x) for x in raw if isinstance(x,(int,float)) or str(x).replace(".","",1).isdigit()]
+            raw = prof.iloc[:, 0].dropna().tolist()
+            vals = [float(x) for x in raw
+                    if isinstance(x, (int, float)) or str(x).replace(".", "", 1).isdigit()]
             if len(vals) < team_size:
                 st.error(f"❌ Profile has fewer than {team_size} rows.")
             else:
@@ -122,7 +120,7 @@ else:
             st.error(f"❌ Failed to read profile: {e}")
 
     if st.sidebar.button("🚀 Optimize Teams"):
-        frequency = {p["Name"]:0 for p in players}
+        frequency = {p["Name"]: 0 for p in players}
         all_teams = []
         prev_teams = []
         upper_cost = budget
@@ -133,55 +131,67 @@ else:
                 for p in players:
                     b = p.get("Bracket")
                     if b:
-                        byb.setdefault(b,[]).append(x_vars[p["Name"]])
+                        byb.setdefault(b, []).append(x_vars[p["Name"]])
                 for lst in byb.values():
                     prob += lpSum(lst) <= 1
 
         if solver_mode == "Maximize Budget Usage":
-            # implicit minimum cost to form a team
-            # implicit minimum cost to form a team, considering fixed includes
-            cost_fixed = sum(p['Value'] for p in players if p['Name'] in include_players)
-            remaining_slots = max(team_size - len(include_players), 0)
-            available_values = sorted(p['Value'] for p in players if p['Name'] not in include_players)
-            min_possible_cost = cost_fixed + sum(available_values[:remaining_slots])
-
             # iterative LP with decreasing upper_cost
             for _ in range(num_teams):
+                # compute dynamic min cost given frequency & includes
+                cost_fixed = sum(p["Value"] for p in players if p["Name"] in include_players)
+                remaining_slots = team_size - len(include_players)
+                # available general players under frequency cap
+                avail_general = [p for p in players
+                                 if p["Name"] not in include_players
+                                 and frequency[p["Name"]] < max_occurrences]
+                if remaining_slots > len(avail_general):
+                    st.info("Niet genoeg beschikbare spelers voor resterende slots. Stoppen.")
+                    break
+                cheapest = sorted(p["Value"] for p in avail_general)[:remaining_slots]
+                min_possible_cost = cost_fixed + sum(cheapest)
+
                 if upper_cost < min_possible_cost:
-                    st.info(f"🎯 Onder minimale haalbare kosten ({min_possible_cost}). Stoppen.")
+                    st.info(f"🎯 Onder minimum haalbare kosten ({min_possible_cost}). Stoppen.")
                     break
 
                 prob = LpProblem("opt", LpMaximize)
                 x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
-                prob += lpSum(x[n]*next(p["Value"] for p in players if p["Name"]==n) for n in x)
+                prob += lpSum(x[n] * next(p["Value"] for p in players if p["Name"] == n)
+                              for n in x)
                 prob += lpSum(x[n] for n in x) == team_size
-                prob += lpSum(x[n]*next(p["Value"] for p in players if p["Name"]==n) for n in x) <= upper_cost
+                prob += lpSum(x[n] * next(p["Value"] for p in players if p["Name"] == n)
+                              for n in x) <= upper_cost
                 add_bracket(prob, x)
-                for n in include_players: prob += x[n] == 1
-                for n in exclude_players: prob += x[n] == 0
-                for n,c in frequency.items():
+                for n in include_players:
+                    prob += x[n] == 1
+                for n in exclude_players:
+                    prob += x[n] == 0
+                for n, c in frequency.items():
                     if n not in include_players and n not in exclude_players and c >= max_occurrences:
                         prob += x[n] == 0
-                # exclude exact previous teams
                 for team in prev_teams:
                     prob += lpSum(x[n] for n in team) <= team_size - 1
 
                 prob.solve()
                 if prob.status != 1:
                     st.warning(f"⚠️ LP infeasible at upper_cost={upper_cost}. Using greedy fallback.")
-                    # greedy fill (budget-safe)
+                    # greedy fill
                     sel = []
                     while len(sel) < team_size:
                         used = {p["Name"] for p in sel}
                         current_cost = sum(p["Value"] for p in sel)
-                        cands = [p for p in players if p["Name"] not in used 
+                        cands = [p for p in players
+                                 if p["Name"] not in used
                                  and current_cost + p["Value"] <= budget
-                                 and (p["Name"] in include_players or p["Name"] in exclude_players 
+                                 and (p["Name"] in include_players
+                                      or p["Name"] in exclude_players
                                       or frequency[p["Name"]] < max_occurrences)]
                         if use_bracket_constraints:
                             used_b = {q.get("Bracket") for q in sel if q.get("Bracket")}
                             cands = [p for p in cands if p.get("Bracket") not in used_b]
-                        if not cands: break
+                        if not cands:
+                            break
                         cands.sort(key=lambda p: -p["Value"])
                         sel.append(cands[0])
                     team = sel
@@ -190,32 +200,33 @@ else:
 
                 cost = sum(p["Value"] for p in team)
                 prev_teams.append([p["Name"] for p in team])
-                for p in team: frequency[p["Name"]] += 1
+                for p in team:
+                    frequency[p["Name"]] += 1
                 all_teams.append(team)
                 upper_cost = cost - 0.1
-
         else:
             # other solver modes...
             pass
 
         # compute frequency percentages
-        freq_pct = {n: (c/num_teams*100) for n,c in frequency.items()}
+        freq_pct = {n: (c / num_teams * 100) for n, c in frequency.items()}
 
         # write & display teams
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as wr:
             for i, team in enumerate(all_teams, start=1):
                 df_t = pd.DataFrame(team)
-                df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(freq_pct.get(n,0),1))
+                df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(freq_pct.get(n, 0), 1))
                 df_t.to_excel(wr, sheet_name=f"Team{i}", index=False)
         buf.seek(0)
 
         for i, team in enumerate(all_teams, start=1):
             with st.expander(f"Team {i}"):
                 df_t = pd.DataFrame(team)
-                df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(freq_pct.get(n,0),1))
+                df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(freq_pct.get(n, 0), 1))
                 st.dataframe(df_t)
 
         st.download_button("📥 Download All Teams (Excel)", buf,
                            file_name="all_teams.xlsx",
                            mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet")
+    
