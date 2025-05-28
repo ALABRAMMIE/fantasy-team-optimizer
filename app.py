@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 from pulp import LpProblem, LpMaximize, LpVariable, lpSum
@@ -210,7 +211,6 @@ else:
                 prev.append([p["Name"] for p in team])
                 for p in team: frequency[p["Name"]] += 1
                 all_teams.append(team)
-
         # Greedy solver
         else:  # Closest FTP Match
             seen = {}
@@ -260,17 +260,25 @@ else:
                 for p in team: frequency[p["Name"]] +=1
                 all_teams.append(team)
 
+        # Bereken selectie-percentages per speler
+        freq_pct = {name: (count / num_teams * 100) for name, count in frequency.items()}
+
         # --- Download All ---
         buf = BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as wr:
             for i, team in enumerate(all_teams, start=1):
-                pd.DataFrame(team).to_excel(wr, sheet_name=f"Team{i}", index=False)
+                df_team = pd.DataFrame(team)
+                df_team["Selectie (%)"] = df_team["Name"].apply(lambda n: round(freq_pct.get(n, 0), 1))
+                df_team.to_excel(wr, sheet_name=f"Team{i}", index=False)
         buf.seek(0)
 
         # show & download
         for i, team in enumerate(all_teams, start=1):
             with st.expander(f"Team {i}"):
-                st.dataframe(pd.DataFrame(team))
+                df_team = pd.DataFrame(team)
+                df_team["Selectie (%)"] = df_team["Name"].apply(lambda n: round(freq_pct.get(n, 0), 1))
+                st.dataframe(df_team)
+
         st.download_button("📥 Download All Teams (Excel)", buf,
                            file_name="all_teams.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
