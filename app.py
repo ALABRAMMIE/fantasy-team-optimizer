@@ -121,7 +121,7 @@ else:
                     if isinstance(x,(int,float))
                     or str(x).replace(".","",1).isdigit()]
             if len(vals) < team_size:
-                st.error(f"❌ Profile has fewer than {team_size} rows.")
+                st.error(f"❌ Profile has fewer dan {team_size} rows.")
             else:
                 target_values = vals[:team_size]
         except Exception as e:
@@ -173,28 +173,32 @@ else:
                     st.warning(f"⚠️ LP returned {len(sel_names)}/ {team_size} (status={status}). Using greedy fill.")
                     sel_recs = []
                     used = set()
+                    # force includes
                     for n in include_players:
                         for p in players:
                             if p["Name"]==n:
                                 sel_recs.append(p); used.add(n); break
-                    keyf = (lambda p:-p["Value"]) if solver_mode=="Maximize Budget Usage" else (lambda p:-p.get("FTPS",0))
+                    # greedy fill with budget constraint
                     while len(sel_recs) < team_size:
+                        used_names = set([p["Name"] for p in sel_recs])
+                        current_cost = sum(p["Value"] for p in sel_recs)
                         cands = [
                             p for p in players
-                            if p["Name"] not in used and
-                            (p["Name"] in include_players
-                             or p["Name"] in exclude_players
-                             or frequency[p["Name"]] < max_occurrences)
+                            if p["Name"] not in used_names
+                            and current_cost + p["Value"] <= budget
+                            and (p["Name"] in include_players
+                                 or p["Name"] in exclude_players
+                                 or frequency[p["Name"]] < max_occurrences)
                         ]
                         if use_bracket_constraints:
                             used_b = {q.get("Bracket") for q in sel_recs if q.get("Bracket")}
                             cands = [p for p in cands if p.get("Bracket") not in used_b]
                         if not cands:
-                            cands = [p for p in players if p["Name"] not in used]
+                            break
+                        keyf = (lambda p: -p["Value"]) if solver_mode=="Maximize Budget Usage" else (lambda p: -p.get("FTPS",0))
                         cands.sort(key=keyf)
                         pick = cands[0]
                         sel_recs.append(pick)
-                        used.add(pick["Name"])
                     team = sel_recs
                 else:
                     team = [p for p in players if p["Name"] in sel_names]
@@ -218,19 +222,20 @@ else:
                         if b and p["Name"] not in used and b not in br_used:
                             sel.append(p); used.add(p["Name"]); br_used.add(b); break
                 for tgt in target_values[len(sel):]:
+                    current_cost = sum(p["Value"] for p in sel)
                     cands = [
                         p for p in avail
-                        if p["Name"] not in used and
-                        (p["Name"] in include_players
-                         or p["Name"] in exclude_players
-                         or frequency[p["Name"]] < max_occurrences)
+                        if p["Name"] not in used
+                        and current_cost + p["Value"] <= budget
+                        and (p["Name"] in include_players
+                             or p["Name"] in exclude_players
+                             or frequency[p["Name"]] < max_occurrences)
                     ]
                     if use_bracket_constraints:
                         cands = [p for p in cands if p.get("Bracket") not in br_used]
                     if not cands:
-                        cands = [p for p in avail if p["Name"] not in used]
+                        break
                     cands.sort(key=lambda x: abs(x["Value"]-tgt))
-                    if not cands: break
                     pick = cands[0]
                     sel.append(pick)
                     used.add(pick["Name"])
@@ -267,4 +272,4 @@ else:
 
         st.download_button("📥 Download All Teams (Excel)", buf,
                            file_name="all_teams.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet")
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
