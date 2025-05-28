@@ -139,8 +139,11 @@ else:
 
         if solver_mode == "Maximize Budget Usage":
             # implicit minimum cost to form a team
-            lowest_values = sorted(p["Value"] for p in players)[:team_size]
-            min_possible_cost = sum(lowest_values)
+            # implicit minimum cost to form a team, considering fixed includes
+            cost_fixed = sum(p['Value'] for p in players if p['Name'] in include_players)
+            remaining_slots = max(team_size - len(include_players), 0)
+            available_values = sorted(p['Value'] for p in players if p['Name'] not in include_players)
+            min_possible_cost = cost_fixed + sum(available_values[:remaining_slots])
 
             # iterative LP with decreasing upper_cost
             for _ in range(num_teams):
