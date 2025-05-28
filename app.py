@@ -136,23 +136,33 @@ else:
                     prob += lpSum(lst) <= 1
 
         if solver_mode == "Maximize Budget Usage":
-            # iterative LP with decreasing upper_cost
             for _ in range(num_teams):
-                # compute dynamic min cost given frequency & includes
+                # compute dynamic min cost with bracket constraints
                 cost_fixed = sum(p["Value"] for p in players if p["Name"] in include_players)
-                remaining_slots = team_size - len(include_players)
-                # available general players under frequency cap
-                avail_general = [p for p in players
-                                 if p["Name"] not in include_players
-                                 and frequency[p["Name"]] < max_occurrences]
-                if remaining_slots > len(avail_general):
-                    st.info("Niet genoeg beschikbare spelers voor resterende slots. Stoppen.")
+                slots = team_size - len(include_players)
+                # filter eligible candidates
+                avail = [p for p in players
+                         if p["Name"] not in include_players
+                         and frequency[p["Name"]] < max_occurrences]
+                # pick cheapest respecting bracket
+                taken = []
+                used_brackets = set()
+                for p in sorted(avail, key=lambda x: x["Value"]):
+                    b = p.get("Bracket")
+                    if use_bracket_constraints and b and b in used_brackets:
+                        continue
+                    taken.append(p)
+                    if b:
+                        used_brackets.add(b)
+                    if len(taken) == slots:
+                        break
+                # if not enough, stop
+                if len(taken) < slots:
+                    st.info("🎯 Niet genoeg kandidaten met unieke brackets. Stoppen.")
                     break
-                cheapest = sorted(p["Value"] for p in avail_general)[:remaining_slots]
-                min_possible_cost = cost_fixed + sum(cheapest)
-
+                min_possible_cost = cost_fixed + sum(p["Value"] for p in taken)
                 if upper_cost < min_possible_cost:
-                    st.info(f"🎯 Onder minimum haalbare kosten ({min_possible_cost}). Stoppen.")
+                    st.info(f"🎯 Onder minimale haalbare kosten ({min_possible_cost}). Stoppen.")
                     break
 
                 prob = LpProblem("opt", LpMaximize)
@@ -176,7 +186,6 @@ else:
                 prob.solve()
                 if prob.status != 1:
                     st.warning(f"⚠️ LP infeasible at upper_cost={upper_cost}. Using greedy fallback.")
-                    # greedy fill
                     sel = []
                     while len(sel) < team_size:
                         used = {p["Name"] for p in sel}
@@ -192,7 +201,7 @@ else:
                             cands = [p for p in cands if p.get("Bracket") not in used_b]
                         if not cands:
                             break
-                        cands.sort(key=lambda p: -p["Value"])
+                        cands.sort(key=lambda x: -x["Value"])
                         sel.append(cands[0])
                     team = sel
                 else:
@@ -229,4 +238,3 @@ else:
         st.download_button("📥 Download All Teams (Excel)", buf,
                            file_name="all_teams.xlsx",
                            mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet")
-    
