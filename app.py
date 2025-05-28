@@ -64,7 +64,9 @@ max_freq_pct = st.sidebar.number_input("Max Player Frequency (%)",
                                        min_value=0, max_value=100,
                                        value=100, step=5)
 # Use ceil so fractional occurrences count as at least one
-max_occurrences = math.ceil(max_freq_pct/100 * num_teams)
+# Bereken toegestane selecties op basis van floor, maar minstens 1 als procent > 0
+raw_allow = math.floor(max_freq_pct/100 * num_teams)
+max_occurrences = raw_allow if raw_allow > 0 else (1 if max_freq_pct > 0 else 0)
 
 # --- Player Upload & Editing ---
 uploaded_file = st.file_uploader("Upload your Excel file (players)", type=["xlsx"])
