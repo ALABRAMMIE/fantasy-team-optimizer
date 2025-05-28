@@ -10,13 +10,11 @@ import math
 st.title("Fantasy Team Optimizer")
 
 # --- Sidebar Inputs ---
-sport_options = [
-    "-- Choose a sport --", "Cycling", "Speed Skating", "Formula 1", "Stock Exchange",
-    "Tennis", "MotoGP", "Football", "Darts", "Cyclocross", "Golf", "Snooker",
-    "Olympics", "Basketball", "Dakar Rally", "Skiing", "Rugby", "Biathlon",
-    "Handball", "Cross Country", "Baseball", "Ice Hockey", "American Football",
-    "Ski Jumping", "MMA", "Entertainment", "Athletics"
-]
+sport_options = ["-- Choose a sport --", "Cycling", "Speed Skating", "Formula 1", "Stock Exchange",
+                 "Tennis", "MotoGP", "Football", "Darts", "Cyclocross", "Golf", "Snooker",
+                 "Olympics", "Basketball", "Dakar Rally", "Skiing", "Rugby", "Biathlon",
+                 "Handball", "Cross Country", "Baseball", "Ice Hockey", "American Football",
+                 "Ski Jumping", "MMA", "Entertainment", "Athletics"]
 sport = st.sidebar.selectbox("Select a sport", sport_options)
 if "selected_sport" not in st.session_state:
     st.session_state.selected_sport = sport
@@ -27,7 +25,8 @@ elif sport != st.session_state.selected_sport:
     st.session_state.selected_sport = sport
 
 st.sidebar.markdown("### Upload Profile Template")
-template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="template_upload_key")
+template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)",
+                                         type=["xlsx"], key="template_upload_key")
 
 available_formats = []
 format_name = None
@@ -48,10 +47,10 @@ if format_name:
     if m:
         default_team_size = int(m.group(1))
 team_size = st.sidebar.number_input("Team Size", value=default_team_size, step=1)
-
 solver_mode = st.sidebar.radio("Solver Objective", ["Maximize FTPS", "Maximize Budget Usage", "Closest FTP Match"])
 num_teams = st.sidebar.number_input("Number of Teams", min_value=1, max_value=25, value=1, step=1)
-diff_count = st.sidebar.number_input("Min Verschil tussen Teams (aantal spelers)", min_value=0, max_value=team_size, value=1, step=1)
+diff_count = st.sidebar.number_input("Min Verschil tussen Teams (aantal spelers)",
+                                     min_value=0, max_value=team_size, value=1, step=1)
 
 uploaded_file = st.file_uploader("Upload your Excel file (players)", type=["xlsx"])
 if not uploaded_file:
@@ -85,13 +84,13 @@ players = edited.to_dict("records")
 include_players = st.sidebar.multiselect("Players to INCLUDE", edited["Name"], default=[])
 exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited["Name"], default=[])
 
-# Prepare target_values for Closest FTP Match
+# Prepare target values
 target_values = None
 if solver_mode == "Closest FTP Match" and template_file and format_name:
     try:
         prof = pd.read_excel(template_file, sheet_name=format_name, header=None)
-        raw = prof.iloc[:, 0].dropna().tolist()
-        vals = [float(x) for x in raw if isinstance(x, (int, float)) or str(x).replace(".", "", 1).isdigit()]
+        raw = prof.iloc[:,0].dropna().tolist()
+        vals = [float(x) for x in raw if isinstance(x,(int,float)) or str(x).replace(".", "",1).isdigit()]
         if len(vals) < team_size:
             st.error(f"❌ Profile has fewer than {team_size} rows.")
         else:
@@ -101,83 +100,74 @@ if solver_mode == "Closest FTP Match" and template_file and format_name:
 
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
-    prev_names_sets = []
+    prev_sets = []
 
-    # LP-based solvers reuse existing code...
-    # (unchanged Maximize FTPS and Maximize Budget Usage branches)
+    # other solvers omitted for brevity...
 
     if solver_mode == "Closest FTP Match":
         attempts = num_teams * 1000
         for _ in range(attempts):
-            # build one candidate team by greedy closest match
             sel = []
             used_brackets = set()
-            # includes
+            # force includes
             for n in include_players:
                 for p in players:
                     if p["Name"] == n:
                         sel.append(p)
                         used_brackets.add(p.get("Bracket"))
                         break
-            # bracket pick (optional)
+            # optional bracket pick
             if use_bracket_constraints:
                 for p in players:
                     b = p.get("Bracket")
-                    if b and p["Name"] not in [q["Name"] for q in sel] and b not in used_brackets:
+                    if b and p["Name"] not in [x["Name"] for x in sel] and b not in used_brackets:
                         sel.append(p)
                         used_brackets.add(b)
                         break
-            # greedy fill towards target_values
+            # greedy toward targets with randomness
             for idx in range(len(sel), team_size):
                 tgt = target_values[idx]
-                cands = [
-                    p for p in players
-                    if p["Name"] not in [q["Name"] for q in sel]
-                    and p["Name"] not in exclude_players
-                ]
+                cands = [p for p in players if p["Name"] not in [x["Name"] for x in sel] and p["Name"] not in exclude_players]
                 if use_bracket_constraints:
                     cands = [p for p in cands if p.get("Bracket") not in used_brackets]
                 if not cands:
                     break
+                # sort by closeness
                 cands.sort(key=lambda x: abs(x["Value"] - tgt))
-                pick = cands[0]
+                # random among top 5
+                top_k = cands[:5] if len(cands) >= 5 else cands
+                pick = random.choice(top_k)
                 sel.append(pick)
                 used_brackets.add(pick.get("Bracket"))
-
             if len(sel) == team_size:
-                names = [p["Name"] for p in sel]
-                # enforce diff_count
-                ok = True
-                for prev in prev_names_sets:
-                    shared = len(set(names) & prev)
-                    if shared > team_size - diff_count:
-                        ok = False
+                names = set(p["Name"] for p in sel)
+                # check difference
+                valid = True
+                for prev in prev_sets:
+                    if len(names & prev) > team_size - diff_count:
+                        valid = False
                         break
-                if ok:
-                    prev_names_sets.append(set(names))
+                if valid:
+                    prev_sets.append(names)
                     all_teams.append(sel)
                     if len(all_teams) == num_teams:
                         break
 
-    # Compute selection percentages
-    freq_pct = {}
-    for p in players:
-        n = p["Name"]
-        freq_pct[n] = sum(1 for team in all_teams if n in [q["Name"] for q in team]) / max(1, len(all_teams)) * 100
+    # calculate selection % and output...
+    freq_pct = {p["Name"]: sum(p["Name"] in [x["Name"] for team in all_teams for x in team]) / max(1,len(all_teams))*100 for p in players}
 
-    # Output teams
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         for i, team in enumerate(all_teams, start=1):
             df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(freq_pct.get(n, 0), 1))
+            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(freq_pct.get(n,0),1))
             df_t.to_excel(writer, sheet_name=f"Team{i}", index=False)
     buf.seek(0)
 
     for i, team in enumerate(all_teams, start=1):
         with st.expander(f"Team {i}"):
             df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(freq_pct.get(n, 0), 1))
+            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(freq_pct.get(n,0),1))
             st.dataframe(df_t)
 
     st.download_button("📥 Download All Teams (Excel)", buf,
