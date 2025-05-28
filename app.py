@@ -63,7 +63,8 @@ num_teams = st.sidebar.number_input("Number of Teams", min_value=1, max_value=20
 max_freq_pct = st.sidebar.number_input("Max Player Frequency (%)",
                                        min_value=0, max_value=100,
                                        value=100, step=5)
-max_occurrences = math.floor(max_freq_pct/100 * num_teams)
+# Use ceil so fractional occurrences count as at least one
+max_occurrences = math.ceil(max_freq_pct/100 * num_teams)
 
 # --- Player Upload & Editing ---
 uploaded_file = st.file_uploader("Upload your Excel file (players)", type=["xlsx"])
@@ -147,44 +148,35 @@ else:
             for _ in range(num_teams):
                 prob = LpProblem("opt",LpMaximize)
                 x = {p["Name"]:LpVariable(p["Name"],cat="Binary") for p in players}
-                # objective
                 if solver_mode=="Maximize FTPS":
                     prob += lpSum(x[n]*next(p["FTPS"] for p in players if p["Name"]==n)
                                   for n in x)
                 else:
                     prob += lpSum(x[n]*next(p["Value"] for p in players if p["Name"]==n)
                                   for n in x)
-                # constraints
                 prob += lpSum(x[n] for n in x)==team_size
                 prob += lpSum(x[n]*next(p["Value"] for p in players if p["Name"]==n)
                               for n in x) <= budget
                 add_bracket(prob,x)
-                # include/exclude
                 for n in include_players: prob += x[n]==1
                 for n in exclude_players: prob += x[n]==0
-                # freq cap
                 for n,c in frequency.items():
                     if n not in include_players and n not in exclude_players and c>=max_occurrences:
                         prob += x[n]==0
-                # avoid exact prior
                 for t in prev:
                     prob += lpSum(x[name] for name in t) <= team_size-1
 
                 prob.solve()
                 status = prob.status
                 sel_names = [n for n in x if x[n].value()==1]
-
-                # fallback if under-selected or infeasible
                 if status!=1 or len(sel_names) < team_size:
                     st.warning(f"⚠️ LP returned {len(sel_names)}/ {team_size} (status={status}). Using greedy fill.")
                     sel_recs = []
                     used = set()
-                    # force includes
                     for n in include_players:
                         for p in players:
                             if p["Name"]==n:
                                 sel_recs.append(p); used.add(n); break
-                    # greedy fill
                     keyf = (lambda p:-p["Value"]) if solver_mode=="Maximize Budget Usage" else (lambda p:-p.get("FTPS",0))
                     while len(sel_recs) < team_size:
                         cands = [
@@ -206,31 +198,25 @@ else:
                     team = sel_recs
                 else:
                     team = [p for p in players if p["Name"] in sel_names]
-
-                # update freq, prev, all_teams
                 prev.append([p["Name"] for p in team])
                 for p in team: frequency[p["Name"]] += 1
                 all_teams.append(team)
-        # Greedy solver
-        else:  # Closest FTP Match
+        else:
             seen = {}
             attempts = num_teams * 100
             for _ in range(attempts):
                 random.shuffle(players)
                 avail = [p for p in players if p["Name"] not in exclude_players]
                 sel, used, br_used = [], set(), set()
-                # includes
                 for n in include_players:
                     for p in avail:
                         if p["Name"]==n:
                             sel.append(p); used.add(n); break
-                # bracket pick
                 if use_bracket_constraints and not bracket_fail:
                     for p in avail:
                         b = p.get("Bracket")
                         if b and p["Name"] not in used and b not in br_used:
                             sel.append(p); used.add(p["Name"]); br_used.add(b); break
-                # greedy fill
                 for tgt in target_values[len(sel):]:
                     cands = [
                         p for p in avail
@@ -281,4 +267,4 @@ else:
 
         st.download_button("📥 Download All Teams (Excel)", buf,
                            file_name="all_teams.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                           mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet")
