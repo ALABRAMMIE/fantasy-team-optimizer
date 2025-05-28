@@ -138,8 +138,16 @@ else:
                     prob += lpSum(lst) <= 1
 
         if solver_mode == "Maximize Budget Usage":
+            # implicit minimum cost to form a team
+            lowest_values = sorted(p["Value"] for p in players)[:team_size]
+            min_possible_cost = sum(lowest_values)
+
             # iterative LP with decreasing upper_cost
             for _ in range(num_teams):
+                if upper_cost < min_possible_cost:
+                    st.info(f"🎯 Onder minimale haalbare kosten ({min_possible_cost}). Stoppen.")
+                    break
+
                 prob = LpProblem("opt", LpMaximize)
                 x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
                 prob += lpSum(x[n]*next(p["Value"] for p in players if p["Name"]==n) for n in x)
@@ -157,7 +165,6 @@ else:
 
                 prob.solve()
                 if prob.status != 1:
-                    # fallback to greedy if infeasible
                     st.warning(f"⚠️ LP infeasible at upper_cost={upper_cost}. Using greedy fallback.")
                     # greedy fill (budget-safe)
                     sel = []
@@ -178,17 +185,14 @@ else:
                 else:
                     team = [p for p in players if x[p["Name"]].value() == 1]
 
-                # record team and update
                 cost = sum(p["Value"] for p in team)
                 prev_teams.append([p["Name"] for p in team])
                 for p in team: frequency[p["Name"]] += 1
                 all_teams.append(team)
-                # set next upper_cost just below this cost
                 upper_cost = cost - 0.1
 
         else:
-            # existing Maximize FTPS & Closest FTP Match logic...
-            # [omitted for brevity]
+            # other solver modes...
             pass
 
         # compute frequency percentages
