@@ -154,7 +154,10 @@ if st.sidebar.button("🚀 Optimize Teams"):
                         break
 
     # calculate selection % and output...
-    freq_pct = {p["Name"]: sum(p["Name"] in [x["Name"] for team in all_teams for x in team]) / max(1,len(all_teams))*100 for p in players}
+        freq_pct = {}
+        for p in players:
+            count = sum(1 for team in all_teams if any(x['Name'] == p['Name'] for x in team))
+            freq_pct[p['Name']] = (count / max(1, len(all_teams))) * 100
 
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
