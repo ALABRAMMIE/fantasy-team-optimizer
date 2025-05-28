@@ -192,7 +192,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
 
     else:  # Closest FTP Match
         seen = {}
-        attempts = num_teams * 100
+        attempts = num_teams * 1000
         for _ in range(attempts):
             random.shuffle(players)
             avail = [p for p in players if p["Name"] not in exclude_players]
