@@ -60,10 +60,17 @@ if not uploaded_file:
     st.stop()
 
 # Read players: always load from first sheet
-df = pd.read_excel(uploaded_file)
+try:
+    df = pd.read_excel(uploaded_file)
+except Exception as e:
+    st.error(f"❌ Failed to read players file: {e}")
+    st.stop()
 
-if not {"Name", "Value"}.issubset(df.columns):"Name", "Value"}.issubset(df.columns):
+if not {"Name", "Value"}.issubset(df.columns):
     st.error("❌ File must include 'Name' and 'Value'.")
+    st.stop()
+
+# --- Edit player data ---("❌ File must include 'Name' and 'Value'.")
     st.stop()
 
 # --- Edit player data ---
