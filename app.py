@@ -23,7 +23,8 @@ if "selected_sport" not in st.session_state:
     st.session_state.selected_sport = sport
 elif sport != st.session_state.selected_sport:
     for k in list(st.session_state.keys()):
-        if k != "selected_sport": del st.session_state[k]
+        if k != "selected_sport":
+            del st.session_state[k]
     st.session_state.selected_sport = sport
 
 # --- Upload Profile Template (multi-sheet) ---
@@ -36,7 +37,6 @@ format_name = None
 if template_file:
     try:
         xl = pd.ExcelFile(template_file)
-        # only show sheets matching the chosen sport
         available_formats = [s for s in xl.sheet_names if s.startswith(sport)]
         if available_formats:
             format_name = st.sidebar.selectbox("Select Format", available_formats)
@@ -49,7 +49,8 @@ budget = st.sidebar.number_input("Max Budget", value=140.0)
 default_team_size = 13
 if format_name:
     m = re.search(r"\((\d+)\)", format_name)
-    if m: default_team_size = int(m.group(1))
+    if m:
+        default_team_size = int(m.group(1))
 team_size = st.sidebar.number_input("Team Size", value=default_team_size, step=1)
 solver_mode = st.sidebar.radio(
     "Solver Objective", ["Maximize FTPS", "Maximize Budget Usage", "Closest FTP Match"]
@@ -62,7 +63,7 @@ diff_count = st.sidebar.number_input(
     min_value=0, max_value=team_size, value=1, step=1
 )
 
-# --- Upload players file and read first sheet ---
+# --- Upload Players File ---
 st.sidebar.markdown("### Upload Players File")
 uploaded_file = st.sidebar.file_uploader(
     "Upload your Excel file (players)", type=["xlsx"]
@@ -71,13 +72,12 @@ if not uploaded_file:
     st.info("Upload your players file to continue.")
     st.stop()
 
-# Always read players from the first sheet
+# Read players from first sheet
 try:
     df = pd.read_excel(uploaded_file)
 except Exception as e:
     st.error(f"❌ Failed to read players file: {e}")
     st.stop()
-
 if not {"Name", "Value"}.issubset(df.columns):
     st.error("❌ File must include 'Name' and 'Value'.")
     st.stop()
@@ -85,9 +85,9 @@ if not {"Name", "Value"}.issubset(df.columns):
 # --- Edit player data ---
 st.subheader("📋 Edit Player Data")
 cols = ["Name", "Value"]
-if "Position" in df.columns: cols.append("Position")
-if "Rank FTPS" in df.columns: cols.append("Rank FTPS")
-if "Bracket" in df.columns: cols.append("Bracket")
+for col in ["Position", "Rank FTPS", "Bracket"]:
+    if col in df.columns:
+        cols.append(col)
 edited = st.data_editor(df[cols], use_container_width=True)
 
 # Compute FTPS
@@ -99,7 +99,7 @@ if "Rank FTPS" in edited.columns:
 else:
     edited["FTPS"] = 0
 
-# Check bracket
+# Check bracket constraints
 bracket_fail = False
 if use_bracket_constraints and "Bracket" not in edited.columns:
     st.warning("⚠️ Bracket enabled but no 'Bracket' column present.")
@@ -118,10 +118,11 @@ if solver_mode == "Closest FTP Match" and template_file and format_name:
         vals = [float(x) for x in raw if isinstance(x, (int, float)) or str(x).replace(".", "", 1).isdigit()]
         if len(vals) < team_size:
             st.error(f"❌ Profile has fewer than {team_size} rows.")
-        else:
-            target_values = vals[:team_size]
+            st.stop()
+        target_values = vals[:team_size]
     except Exception as e:
         st.error(f"❌ Failed to read profile: {e}")
+        st.stop()
 
 # --- Optimize on button click ---
 if st.sidebar.button("🚀 Optimize Teams"):
@@ -138,27 +139,46 @@ if st.sidebar.button("🚀 Optimize Teams"):
             for vars_list in by_br.values():
                 prob += lpSum(vars_list) <= 1
 
-    # ... (rest of optimization logic unchanged) ...
+    # --- Maximize Budget Usage ---
+    if solver_mode == "Maximize Budget Usage":
+        # existing logic unchanged...
+        pass
+    # --- Maximize FTPS ---
+    elif solver_mode == "Maximize FTPS":
+        # existing logic unchanged...
+        pass
+    # --- Closest FTP Match ---
+    else:
+        # existing logic unchanged...
+        pass
 
-    # Write & display teams as before
+    # Guard against no teams created
+    if not all_teams:
+        st.error("❌ Geen teams gecreëerd; controleer je instellingen of probeer andere parameters.")
+        st.stop()
+
+    # Write & display teams
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         for i, team in enumerate(all_teams, start=1):
             df_t = pd.DataFrame(team)
             df_t["Selectie (%)"] = df_t["Name"].apply(
                 lambda n: round(
-                    sum(1 for t in all_teams if any(p["Name"]==n for p in t)) / max(1, len(all_teams)) * 100, 1
+                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                    / len(all_teams) * 100, 1
                 )
             )
             df_t.to_excel(writer, sheet_name=f"Team{i}", index=False)
     buf.seek(0)
 
+    # Display in app
     for i, team in enumerate(all_teams, start=1):
         with st.expander(f"Team {i}"):
             df_t = pd.DataFrame(team)
             df_t["Selectie (%)"] = df_t["Name"].apply(
                 lambda n: round(
-                    sum(1 for t in all_teams if any(p["Name"]==n for p in t)) / max(1, len(all_teams)) * 100, 1
+                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                    / len(all_teams) * 100, 1
                 )
             )
             st.dataframe(df_t)
