@@ -59,17 +59,10 @@ if not uploaded_file:
     st.info("Upload your players file to continue.")
     st.stop()
 
-# Read players: if template sheet selected, load that sheet, else first
-try:
-    if format_name:
-        df = pd.read_excel(uploaded_file, sheet_name=format_name)
-    else:
-        df = pd.read_excel(uploaded_file)
-except Exception as e:
-    st.warning(f"⚠️ Could not read sheet '{format_name}' from players file; loading first sheet. Error: {e}")
-    df = pd.read_excel(uploaded_file)
+# Read players: always load from first sheet
+df = pd.read_excel(uploaded_file)
 
-if not {"Name", "Value"}.issubset(df.columns):
+if not {"Name", "Value"}.issubset(df.columns):"Name", "Value"}.issubset(df.columns):
     st.error("❌ File must include 'Name' and 'Value'.")
     st.stop()
 
