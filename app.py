@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from pulp import LpProblem, LpMaximize, LpVariable, lpSum
@@ -28,26 +27,26 @@ elif sport != st.session_state.selected_sport:
             del st.session_state[k]
     st.session_state.selected_sport = sport
 
-# Upload template
+# --- Upload Profile Template (multi-sheet) and choose which sheet to use ---
 st.sidebar.markdown("### Upload Profile Template")
 template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)",
                                          type=["xlsx"], key="template_upload_key")
-
 available_formats = []
 format_name = None
 if template_file:
     try:
         xl = pd.ExcelFile(template_file)
+        # only show sheets matching the chosen sport
         available_formats = [s for s in xl.sheet_names if s.startswith(sport)]
         if available_formats:
             format_name = st.sidebar.selectbox("Select Format", available_formats)
-    except:
+    except Exception:
         st.sidebar.warning("⚠️ Unable to read sheets from template.")
 
-# Constraints inputs
+# --- Constraints inputs ---
 use_bracket_constraints = st.sidebar.checkbox("Use Bracket Constraints")
 budget = st.sidebar.number_input("Max Budget", value=140.0)
-# default team size from sheet name e.g. '(9)'
+# derive default team size from sheet name e.g. '(9)'
 default_team_size = 13
 if format_name:
     m = re.search(r"\((\d+)\)", format_name)
@@ -61,19 +60,28 @@ num_teams = st.sidebar.number_input("Number of Teams", min_value=1, max_value=25
 diff_count = st.sidebar.number_input("Min Verschil tussen Teams (aantal spelers)",
                                      min_value=0, max_value=team_size, value=1, step=1)
 
-# Upload players file
+# --- Upload players file and read from selected sheet ---
+st.sidebar.markdown("### Upload Players File")
 uploaded_file = st.sidebar.file_uploader("Upload your Excel file (players)", type=["xlsx"])
 if not uploaded_file:
     st.info("Upload your players file to continue.")
     st.stop()
 
-# Read players
-df = pd.read_excel(uploaded_file)
+# read players list using the same 'format_name' sheet if available
+try:
+    if format_name:
+        df = pd.read_excel(uploaded_file, sheet_name=format_name)
+    else:
+        df = pd.read_excel(uploaded_file)
+except Exception as e:
+    st.warning(f"⚠️ Could not read sheet '{format_name}' from players file; loading first sheet instead.")
+    df = pd.read_excel(uploaded_file)
+
 if not {"Name", "Value"}.issubset(df.columns):
     st.error("❌ File must include 'Name' and 'Value'.")
     st.stop()
 
-# Edit player data
+# --- Edit player data ---
 st.subheader("📋 Edit Player Data")
 cols = ["Name", "Value"]
 if "Position" in df.columns: cols.append("Position")
@@ -81,7 +89,7 @@ if "Rank FTPS" in df.columns: cols.append("Rank FTPS")
 if "Bracket" in df.columns: cols.append("Bracket")
 edited = st.data_editor(df[cols], use_container_width=True)
 
-# Compute FTPS
+# compute FTPS
 if "Rank FTPS" in edited.columns:
     rank_map = {r: max(0, 150 - (r-1)*5) for r in range(1, 31)}
     edited["FTPS"] = edited["Rank FTPS"].apply(
@@ -89,7 +97,7 @@ if "Rank FTPS" in edited.columns:
 else:
     edited["FTPS"] = 0
 
-# Check bracket
+# bracket check
 bracket_fail = False
 if use_bracket_constraints and "Bracket" not in edited.columns:
     st.warning("⚠️ Bracket enabled but no 'Bracket' column present.")
@@ -99,7 +107,7 @@ players = edited.to_dict("records")
 include_players = st.sidebar.multiselect("Players to INCLUDE", edited["Name"])
 exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited["Name"])
 
-# Read target profile
+# --- Read target profile values for Closest FTP Match ---
 target_values = None
 if solver_mode == "Closest FTP Match" and template_file and format_name:
     try:
@@ -113,7 +121,7 @@ if solver_mode == "Closest FTP Match" and template_file and format_name:
     except Exception as e:
         st.error(f"❌ Failed to read profile: {e}")
 
-# Optimize
+# --- Optimize on button click ---
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
     prev_sets = []
