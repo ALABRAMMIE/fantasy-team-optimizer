@@ -173,37 +173,41 @@ if st.sidebar.button("🚀 Optimize Teams"):
     # Closest FTP Match uses exact-match logic
     else:
         for _ in range(num_teams):
-            sel = []
+            # Initialize fixed slots based on target profile
+            slots = [None] * team_size
             used_brackets = set()
-            # Force includes
+            used_names = set()
+            # Place included players in their closest matching target slot
             for n in include_players:
                 p0 = next(p for p in players if p["Name"] == n)
-                sel.append(p0)
-                if use_bracket_constraints:
+                diffs = [(i, abs(p0["Value"] - target_values[i])) for i in range(team_size) if slots[i] is None]
+                best_i = min(diffs, key=lambda x: x[1])[0]
+                slots[best_i] = p0
+                used_names.add(p0["Name"])
+                if use_bracket_constraints and p0.get("Bracket"):
                     used_brackets.add(p0.get("Bracket"))
-            # Add one from each bracket if needed
-            if use_bracket_constraints:
-                for p in players:
-                    b = p.get("Bracket")
-                    if b and p["Name"] not in [q["Name"] for q in sel] and b not in used_brackets:
-                        sel.append(p)
-                        used_brackets.add(b)
-            # Greedy closest-match for remaining slots
-            for idx in range(len(sel), team_size):
-                tgt = target_values[idx]
-                cands = [p for p in players if p["Name"] not in [q["Name"] for q in sel] and p["Name"] not in exclude_players]
+            # Greedy fill remaining slots by closest match
+            for i in range(team_size):
+                if slots[i] is not None:
+                    continue
+                tgt = target_values[i]
+                cands = [p for p in players if p["Name"] not in used_names and p["Name"] not in exclude_players]
                 if use_bracket_constraints:
                     cands = [p for p in cands if p.get("Bracket") not in used_brackets]
                 if not cands:
                     break
-                # exact closest: INDEX/MATCH equivalent
+                # pick the candidate closest to target
                 pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
-                sel.append(pick)
-                if use_bracket_constraints:
+                slots[i] = pick
+                used_names.add(pick["Name"])
+                if use_bracket_constraints and pick.get("Bracket"):
                     used_brackets.add(pick.get("Bracket"))
-            if len(sel) == team_size and all(len({p["Name"] for p in sel} & prev) <= team_size - diff_count for prev in prev_sets):
-                all_teams.append(sel)
-                prev_sets.append({p["Name"] for p in sel})
+            # finalize team
+            team = slots
+            names_set = {p["Name"] for p in team if p}
+            if all(len(names_set & prev) <= team_size - diff_count for prev in prev_sets):
+                all_teams.append(team)
+                prev_sets.append(names_set)
                 if len(all_teams) == num_teams:
                     break
 
