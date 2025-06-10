@@ -204,10 +204,17 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     used_brackets.add(pick.get("Bracket"))
             # finalize team
             team = slots
+            # Budget check for closest match
+            cost = sum(p["Value"] for p in team if p)
+            if cost > budget:
+                st.error(f"❌ Budget exceeded: totale waarde is {cost:.2f} maar max budget is {budget:.2f}.")
+                st.stop()
             names_set = {p["Name"] for p in team if p}
             if all(len(names_set & prev) <= team_size - diff_count for prev in prev_sets):
                 all_teams.append(team)
                 prev_sets.append(names_set)
+                if len(all_teams) == num_teams:
+                    break
                 if len(all_teams) == num_teams:
                     break
 
