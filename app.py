@@ -30,7 +30,9 @@ elif sport != st.session_state.selected_sport:
 # --- Upload Profile Template (multi-sheet) ---
 st.sidebar.markdown("### Upload Profile Template")
 template_file = st.sidebar.file_uploader(
-    "Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="template_upload_key"
+    "Upload Target Profile Template (multi-sheet)",
+    type=["xlsx"],
+    key="template_upload_key"
 )
 available_formats = []
 format_name = None
@@ -100,13 +102,3 @@ def load_players(file):
         df = pd.read_excel(file)
     except Exception as e:
         st.error(f"❌ Failed to read players file: {e}")
-        st.stop()
-    if not {"Name", "Value"}.issubset(df.columns):
-        st.error("❌ File must include 'Name' and 'Value'.")
-        st.stop()
-    return df
-
-df = load_players(uploaded_file)
-
-# --- Edit player data and snapshot base_FTPS ---
-st.
