@@ -58,7 +58,6 @@ if not uploaded_file:
     st.info("Upload your players file to continue.")
     st.stop()
 
-# Always read players from first sheet
 def load_players(file):
     try:
         df = pd.read_excel(file)
@@ -75,15 +74,16 @@ df = load_players(uploaded_file)
 # --- Edit player data ---
 st.subheader("📋 Edit Player Data")
 cols = ["Name", "Value"]
-for col in ["Position", "Rank FTPS", "Bracket"]:
-    if col in df.columns: cols.append(col)
+# ← changed here: show FTPS instead of Rank FTPS
+for col in ["Position", "FTPS", "Bracket"]:
+    if col in df.columns:
+        cols.append(col)
 edited = st.data_editor(df[cols], use_container_width=True)
 
-# Compute FTPS
-if "Rank FTPS" in edited.columns:
-    rank_map = {r: max(0, 150 - (r-1)*5) for r in range(1, 31)}
-    edited["FTPS"] = edited["Rank FTPS"].apply(lambda x: rank_map.get(int(x), 0) if pd.notnull(x) else 0)
-else:
+# ← changed here: drop the old Rank→FTPS mapping,
+#             trust the uploaded FTPS if present,
+#             else fill with zeros.
+if "FTPS" not in edited.columns:
     edited["FTPS"] = 0
 
 # Bracket check
@@ -154,6 +154,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
         for _ in range(num_teams):
             prob = LpProblem("opt", LpMaximize)
             x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+            # ← unchanged: now pulls from p["FTPS"]
             ftps_expr = lpSum(x[n] * next(p["FTPS"] for p in players if p["Name"] == n) for n in x)
             prob += ftps_expr
             prob += lpSum(x.values()) == team_size
@@ -170,14 +171,12 @@ if st.sidebar.button("🚀 Optimize Teams"):
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
 
-    # Closest FTP Match uses exact-match logic
+    # Closest FTP Match
     else:
         for _ in range(num_teams):
-            # Initialize fixed slots based on target profile
             slots = [None] * team_size
             used_brackets = set()
             used_names = set()
-            # Place included players in their closest matching target slot
             for n in include_players:
                 p0 = next(p for p in players if p["Name"] == n)
                 diffs = [(i, abs(p0["Value"] - target_values[i])) for i in range(team_size) if slots[i] is None]
@@ -186,7 +185,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 used_names.add(p0["Name"])
                 if use_bracket_constraints and p0.get("Bracket"):
                     used_brackets.add(p0.get("Bracket"))
-            # Greedy fill remaining slots by closest match
             for i in range(team_size):
                 if slots[i] is not None:
                     continue
@@ -196,15 +194,12 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     cands = [p for p in cands if p.get("Bracket") not in used_brackets]
                 if not cands:
                     break
-                # pick the candidate closest to target
                 pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
                 slots[i] = pick
                 used_names.add(pick["Name"])
                 if use_bracket_constraints and pick.get("Bracket"):
                     used_brackets.add(pick.get("Bracket"))
-            # finalize team
             team = slots
-            # Budget check for closest match
             cost = sum(p["Value"] for p in team if p)
             if cost > budget:
                 st.error(f"❌ Budget exceeded: totale waarde is {cost:.2f} maar max budget is {budget:.2f}.")
@@ -215,27 +210,32 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 prev_sets.append(names_set)
                 if len(all_teams) == num_teams:
                     break
-                if len(all_teams) == num_teams:
-                    break
 
-    # No teams guard
     if not all_teams:
         st.error("❌ Geen teams gecreëerd; controleer je instellingen of probeer andere parameters.")
         st.stop()
 
-    # Write & display teams
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         for i, team in enumerate(all_teams, start=1):
             df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(sum(1 for t in all_teams if any(p["Name"] == n for p in t)) / len(all_teams) * 100, 1))
+            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(
+                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                / len(all_teams) * 100, 1))
             df_t.to_excel(writer, sheet_name=f"Team{i}", index=False)
     buf.seek(0)
 
     for i, team in enumerate(all_teams, start=1):
         with st.expander(f"Team {i}"):
             df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(sum(1 for t in all_teams if any(p["Name"] == n for p in t)) / len(all_teams) * 100, 1))
+            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(
+                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                / len(all_teams) * 100, 1))
             st.dataframe(df_t)
 
-    st.download_button("📥 Download All Teams (Excel)", buf, file_name="all_teams.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button(
+        "📥 Download All Teams (Excel)",
+        buf,
+        file_name="all_teams.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
