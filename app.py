@@ -66,7 +66,7 @@ diff_count = st.sidebar.number_input(
     value=1
 )
 
-# New: Max usage %
+# New: max usage % per player/team
 max_usage_pct = st.sidebar.slider(
     "Max Usage % per player/team",
     min_value=0,
@@ -74,6 +74,16 @@ max_usage_pct = st.sidebar.slider(
     value=100,
     step=5,
     help="Cap the fraction of teams any one player can appear on (excludes forced include/exclude)."
+)
+
+# New: FTPS randomness %
+ftps_rand_pct = st.sidebar.slider(
+    "FTPS Randomness % for subsequent teams",
+    min_value=0,
+    max_value=100,
+    value=0,
+    step=5,
+    help="Apply ± this percent random noise to FTPS values for teams 2…N."
 )
 
 # Upload Players File
@@ -219,16 +229,23 @@ if st.sidebar.button("🚀 Optimize Teams"):
 
     # Maximize FTPS
     elif solver_mode == "Maximize FTPS":
-        for _ in range(num_teams):
+        for idx in range(num_teams):
             prob = LpProblem("opt", LpMaximize)
             x = {
                 p["Name"]: LpVariable(p["Name"], cat="Binary")
                 for p in players
             }
-            ftps_expr = lpSum(
-                x[n] * next(p["FTPS"] for p in players if p["Name"] == n)
-                for n in x
-            )
+
+            # New: apply randomness to FTPS for teams beyond the first
+            if idx > 0 and ftps_rand_pct > 0:
+                ftps_values = {
+                    p["Name"]: p["FTPS"] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))
+                    for p in players
+                }
+            else:
+                ftps_values = {p["Name"]: p["FTPS"] for p in players}
+
+            ftps_expr = lpSum(x[n] * ftps_values[n] for n in x)
             prob += ftps_expr
             prob += lpSum(x.values()) == team_size
             prob += lpSum(
