@@ -3,6 +3,7 @@ import pandas as pd
 from pulp import LpProblem, LpMaximize, LpVariable, lpSum
 import random
 import re
+import math
 from io import BytesIO
 
 st.title("Fantasy Team Optimizer")
@@ -22,12 +23,15 @@ if "selected_sport" not in st.session_state:
     st.session_state.selected_sport = sport
 elif sport != st.session_state.selected_sport:
     for k in list(st.session_state.keys()):
-        if k != "selected_sport": del st.session_state[k]
+        if k != "selected_sport":
+            del st.session_state[k]
     st.session_state.selected_sport = sport
 
-# --- Upload Profile Template (multi-sheet) ---
+# Upload Profile Template (multi-sheet)
 st.sidebar.markdown("### Upload Profile Template")
-template_file = st.sidebar.file_uploader("Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="template_upload_key")
+template_file = st.sidebar.file_uploader(
+    "Upload Target Profile Template (multi-sheet)", type=["xlsx"], key="template_upload_key"
+)
 available_formats = []
 format_name = None
 if template_file:
@@ -39,21 +43,44 @@ if template_file:
     except Exception:
         st.sidebar.warning("⚠️ Unable to read sheets from template.")
 
-# --- Constraints inputs ---
+# Constraints inputs
 use_bracket_constraints = st.sidebar.checkbox("Use Bracket Constraints")
 budget = st.sidebar.number_input("Max Budget", value=140.0)
 default_team_size = 13
 if format_name:
     m = re.search(r"\((\d+)\)", format_name)
-    if m: default_team_size = int(m.group(1))
+    if m:
+        default_team_size = int(m.group(1))
 team_size = st.sidebar.number_input("Team Size", value=default_team_size, step=1)
-solver_mode = st.sidebar.radio("Solver Objective", ["Maximize FTPS", "Maximize Budget Usage", "Closest FTP Match"])
-num_teams = st.sidebar.number_input("Number of Teams", min_value=1, max_value=25, value=1)
-diff_count = st.sidebar.number_input("Min Verschil tussen Teams (aantal spelers)", min_value=0, max_value=team_size, value=1)
+solver_mode = st.sidebar.radio(
+    "Solver Objective",
+    ["Maximize FTPS", "Maximize Budget Usage", "Closest FTP Match"]
+)
+num_teams = st.sidebar.number_input(
+    "Number of Teams", min_value=1, max_value=25, value=1
+)
+diff_count = st.sidebar.number_input(
+    "Min Verschil tussen Teams (aantal spelers)",
+    min_value=0,
+    max_value=team_size,
+    value=1
+)
 
-# --- Upload Players File ---
+# New: Max usage %
+max_usage_pct = st.sidebar.slider(
+    "Max Usage % per player/team",
+    min_value=0,
+    max_value=100,
+    value=100,
+    step=5,
+    help="Cap the fraction of teams any one player can appear on (excludes forced include/exclude)."
+)
+
+# Upload Players File
 st.sidebar.markdown("### Upload Players File")
-uploaded_file = st.sidebar.file_uploader("Upload your Excel file (players)", type=["xlsx"])
+uploaded_file = st.sidebar.file_uploader(
+    "Upload your Excel file (players)", type=["xlsx"]
+)
 if not uploaded_file:
     st.info("Upload your players file to continue.")
     st.stop()
@@ -71,18 +98,15 @@ def load_players(file):
 
 df = load_players(uploaded_file)
 
-# --- Edit player data ---
+# Edit player data
 st.subheader("📋 Edit Player Data")
 cols = ["Name", "Value"]
-# ← changed here: show FTPS instead of Rank FTPS
 for col in ["Position", "FTPS", "Bracket"]:
     if col in df.columns:
         cols.append(col)
 edited = st.data_editor(df[cols], use_container_width=True)
 
-# ← changed here: drop the old Rank→FTPS mapping,
-#             trust the uploaded FTPS if present,
-#             else fill with zeros.
+# Ensure FTPS exists
 if "FTPS" not in edited.columns:
     edited["FTPS"] = 0
 
@@ -93,16 +117,26 @@ if use_bracket_constraints and "Bracket" not in edited.columns:
     bracket_fail = True
 
 players = edited.to_dict("records")
-include_players = st.sidebar.multiselect("Players to INCLUDE", edited["Name"])
-exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited["Name"])
+include_players = st.sidebar.multiselect(
+    "Players to INCLUDE", edited["Name"]
+)
+exclude_players = st.sidebar.multiselect(
+    "Players to EXCLUDE", edited["Name"]
+)
 
-# --- Read target profile values for Closest FTP Match ---
+# Read target profile values for Closest FTP Match
 target_values = None
 if solver_mode == "Closest FTP Match" and template_file and format_name:
     try:
-        prof = pd.read_excel(template_file, sheet_name=format_name, header=None)
+        prof = pd.read_excel(
+            template_file, sheet_name=format_name, header=None
+        )
         raw = prof.iloc[:, 0].dropna().tolist()
-        vals = [float(x) for x in raw if isinstance(x, (int, float)) or str(x).replace(".", "", 1).isdigit()]
+        vals = [
+            float(x)
+            for x in raw
+            if isinstance(x, (int, float)) or str(x).replace(".", "", 1).isdigit()
+        ]
         if len(vals) < team_size:
             st.error(f"❌ Profile has fewer than {team_size} rows.")
             st.stop()
@@ -111,40 +145,74 @@ if solver_mode == "Closest FTP Match" and template_file and format_name:
         st.error(f"❌ Failed to read profile: {e}")
         st.stop()
 
-# --- Optimize ---
+# Pre-calculate usage cap
+max_usage_count = math.floor(num_teams * max_usage_pct / 100)
+
+def add_bracket_constraints(prob, x_vars):
+    if use_bracket_constraints and not bracket_fail:
+        groups = {}
+        for p in players:
+            b = p.get("Bracket")
+            if b:
+                groups.setdefault(b, []).append(x_vars[p["Name"]])
+        for vars_list in groups.values():
+            prob += lpSum(vars_list) <= 1
+
+def add_usage_constraints(prob, x_vars):
+    if max_usage_pct < 100:
+        for p in players:
+            name = p["Name"]
+            if name in include_players:
+                continue
+            used_before = sum(1 for prev in prev_sets if name in prev)
+            prob += (
+                used_before + x_vars[name]
+                <= max_usage_count,
+                f"MaxUsage_{name}"
+            )
+
+# Optimize
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
     prev_sets = []
-
-    def add_bracket_constraints(prob, x_vars):
-        if use_bracket_constraints and not bracket_fail:
-            groups = {}
-            for p in players:
-                b = p.get("Bracket")
-                if b:
-                    groups.setdefault(b, []).append(x_vars[p["Name"]])
-            for vars_list in groups.values():
-                prob += lpSum(vars_list) <= 1
 
     # Maximize Budget Usage
     if solver_mode == "Maximize Budget Usage":
         upper = budget
         for _ in range(num_teams):
             prob = LpProblem("opt", LpMaximize)
-            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
-            cost_expr = lpSum(x[n] * next(p["Value"] for p in players if p["Name"] == n) for n in x)
+            x = {
+                p["Name"]: LpVariable(p["Name"], cat="Binary")
+                for p in players
+            }
+            cost_expr = lpSum(
+                x[n] * next(p["Value"] for p in players if p["Name"] == n)
+                for n in x
+            )
             prob += cost_expr
             prob += lpSum(x.values()) == team_size
             prob += cost_expr <= upper
+
             add_bracket_constraints(prob, x)
-            for n in include_players: prob += x[n] == 1
-            for n in exclude_players: prob += x[n] == 0
-            for prev in prev_sets: prob += lpSum(x[n] for n in prev) <= team_size - diff_count
+            add_usage_constraints(prob, x)
+
+            for n in include_players:
+                prob += x[n] == 1
+            for n in exclude_players:
+                prob += x[n] == 0
+            for prev in prev_sets:
+                prob += (
+                    lpSum(x[n] for n in prev)
+                    <= team_size - diff_count
+                )
+
             prob.solve()
             if prob.status != 1:
-                st.warning(f"⚠️ Infeasible at budget <= {upper}.")
+                st.warning(f"⚠️ Infeasible at budget ≤ {upper}.")
                 st.stop()
-            team = [p for p in players if x[p["Name"]].value() == 1]
+            team = [
+                p for p in players if x[p["Name"]].value() == 1
+            ]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
             upper = sum(p["Value"] for p in team) - 0.001
@@ -153,21 +221,41 @@ if st.sidebar.button("🚀 Optimize Teams"):
     elif solver_mode == "Maximize FTPS":
         for _ in range(num_teams):
             prob = LpProblem("opt", LpMaximize)
-            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
-            # ← unchanged: now pulls from p["FTPS"]
-            ftps_expr = lpSum(x[n] * next(p["FTPS"] for p in players if p["Name"] == n) for n in x)
+            x = {
+                p["Name"]: LpVariable(p["Name"], cat="Binary")
+                for p in players
+            }
+            ftps_expr = lpSum(
+                x[n] * next(p["FTPS"] for p in players if p["Name"] == n)
+                for n in x
+            )
             prob += ftps_expr
             prob += lpSum(x.values()) == team_size
-            prob += lpSum(x[n] * next(p["Value"] for p in players if p["Name"] == n) for n in x) <= budget
+            prob += lpSum(
+                x[n] * next(p["Value"] for p in players if p["Name"] == n)
+                for n in x
+            ) <= budget
+
             add_bracket_constraints(prob, x)
-            for n in include_players: prob += x[n] == 1
-            for n in exclude_players: prob += x[n] == 0
-            for prev in prev_sets: prob += lpSum(x[n] for n in prev) <= team_size - diff_count
+            add_usage_constraints(prob, x)
+
+            for n in include_players:
+                prob += x[n] == 1
+            for n in exclude_players:
+                prob += x[n] == 0
+            for prev in prev_sets:
+                prob += (
+                    lpSum(x[n] for n in prev)
+                    <= team_size - diff_count
+                )
+
             prob.solve()
             if prob.status != 1:
                 st.warning("⚠️ LP infeasible for Maximize FTPS.")
                 st.stop()
-            team = [p for p in players if x[p["Name"]].value() == 1]
+            team = [
+                p for p in players if x[p["Name"]].value() == 1
+            ]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
 
@@ -177,60 +265,97 @@ if st.sidebar.button("🚀 Optimize Teams"):
             slots = [None] * team_size
             used_brackets = set()
             used_names = set()
+
+            # place includes
             for n in include_players:
                 p0 = next(p for p in players if p["Name"] == n)
-                diffs = [(i, abs(p0["Value"] - target_values[i])) for i in range(team_size) if slots[i] is None]
+                diffs = [
+                    (i, abs(p0["Value"] - target_values[i]))
+                    for i in range(team_size)
+                    if slots[i] is None
+                ]
                 best_i = min(diffs, key=lambda x: x[1])[0]
                 slots[best_i] = p0
                 used_names.add(p0["Name"])
                 if use_bracket_constraints and p0.get("Bracket"):
-                    used_brackets.add(p0.get("Bracket"))
+                    used_brackets.add(p0["Bracket"])
+
+            # helper for greedy
+            def usage_ok(p):
+                if p["Name"] in include_players:
+                    return True
+                return sum(1 for prev in prev_sets if p["Name"] in prev) < max_usage_count
+
+            # fill greedily
             for i in range(team_size):
                 if slots[i] is not None:
                     continue
                 tgt = target_values[i]
-                cands = [p for p in players if p["Name"] not in used_names and p["Name"] not in exclude_players]
-                if use_bracket_constraints:
-                    cands = [p for p in cands if p.get("Bracket") not in used_brackets]
+                cands = [
+                    p for p in players
+                    if p["Name"] not in used_names
+                    and p["Name"] not in exclude_players
+                    and (not use_bracket_constraints or p.get("Bracket") not in used_brackets)
+                    and usage_ok(p)
+                ]
                 if not cands:
                     break
                 pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
                 slots[i] = pick
                 used_names.add(pick["Name"])
                 if use_bracket_constraints and pick.get("Bracket"):
-                    used_brackets.add(pick.get("Bracket"))
+                    used_brackets.add(pick["Bracket"])
+
             team = slots
             cost = sum(p["Value"] for p in team if p)
             if cost > budget:
-                st.error(f"❌ Budget exceeded: totale waarde is {cost:.2f} maar max budget is {budget:.2f}.")
+                st.error(
+                    f"❌ Budget exceeded: total value is {cost:.2f} but max is {budget:.2f}."
+                )
                 st.stop()
+
             names_set = {p["Name"] for p in team if p}
-            if all(len(names_set & prev) <= team_size - diff_count for prev in prev_sets):
+            if all(
+                len(names_set & prev) <= team_size - diff_count
+                for prev in prev_sets
+            ):
                 all_teams.append(team)
                 prev_sets.append(names_set)
                 if len(all_teams) == num_teams:
                     break
 
+    # No teams guard
     if not all_teams:
-        st.error("❌ Geen teams gecreëerd; controleer je instellingen of probeer andere parameters.")
+        st.error(
+            "❌ Geen teams gecreëerd; controleer je instellingen of probeer andere parameters."
+        )
         st.stop()
 
+    # Write & display
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         for i, team in enumerate(all_teams, start=1):
             df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(
-                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
-                / len(all_teams) * 100, 1))
+            df_t["Selectie (%)"] = df_t["Name"].apply(
+                lambda n: round(
+                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                    / len(all_teams) * 100,
+                    1
+                )
+            )
             df_t.to_excel(writer, sheet_name=f"Team{i}", index=False)
     buf.seek(0)
 
     for i, team in enumerate(all_teams, start=1):
         with st.expander(f"Team {i}"):
             df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(
-                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
-                / len(all_teams) * 100, 1))
+            df_t["Selectie (%)"] = df_t["Name"].apply(
+                lambda n: round(
+                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                    / len(all_teams) * 100,
+                    1
+                )
+            )
             st.dataframe(df_t)
 
     st.download_button(
