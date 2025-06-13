@@ -230,23 +230,19 @@ if st.sidebar.button("🚀 Optimize Teams"):
     # Maximize FTPS
     elif solver_mode == "Maximize FTPS":
         for idx in range(num_teams):
-            # ─── Special case for 1 team, 0% randomness, redundant include ───
+            # Special-case hack for one team, zero randomness, redundant include
             if (
-                num_teams == 1
+                idx == 0
+                and num_teams == 1
                 and ftps_rand_pct == 0
                 and include_players
-                and idx == 0
             ):
-                # Solve once without includes
                 prob0 = LpProblem("opt0", LpMaximize)
                 x0 = {
                     p["Name"]: LpVariable(p["Name"], cat="Binary")
                     for p in players
                 }
-                # Objective: use original FTPS
-                prob0 += lpSum(
-                    x0[p["Name"]] * p["FTPS"] for p in players
-                )
+                prob0 += lpSum(x0[p["Name"]] * p["FTPS"] for p in players)
                 prob0 += lpSum(x0.values()) == team_size
                 prob0 += lpSum(
                     x0[n] * next(p["Value"] for p in players if p["Name"] == n)
@@ -258,30 +254,32 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     prob0 += x0[n] == 0
                 prob0.solve()
                 team0 = {n for n, v in x0.items() if v.value() == 1}
-
-                # If all includes are already in optimal, return it
                 if set(include_players).issubset(team0):
                     team = [p for p in players if p["Name"] in team0]
                     all_teams.append(team)
                     prev_sets.append(team0)
-                    break  # done for single team
+                    break  # done
 
-            # ─── Otherwise perform the normal, full solve ───
+            # Determine FTPS values: no randomness on first team
+            if idx == 0:
+                ftps_values = {p["Name"]: p["FTPS"] for p in players}
+            else:
+                if ftps_rand_pct > 0:
+                    ftps_values = {
+                        p["Name"]: p["FTPS"] * (
+                            1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100)
+                        )
+                        for p in players
+                    }
+                else:
+                    ftps_values = {p["Name"]: p["FTPS"] for p in players}
+
+            # Common solve
             prob = LpProblem("opt", LpMaximize)
             x = {
                 p["Name"]: LpVariable(p["Name"], cat="Binary")
                 for p in players
             }
-
-            # apply randomness to FTPS for teams beyond the first
-            if idx > 0 and ftps_rand_pct > 0:
-                ftps_values = {
-                    p["Name"]: p["FTPS"] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))
-                    for p in players
-                }
-            else:
-                ftps_values = {p["Name"]: p["FTPS"] for p in players}
-
             prob += lpSum(x[n] * ftps_values[n] for n in x)
             prob += lpSum(x.values()) == team_size
             prob += lpSum(
@@ -372,14 +370,13 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 if len(all_teams) == num_teams:
                     break
 
-    # No teams guard
+    # --- Write & display teams ---
     if not all_teams:
         st.error(
             "❌ Geen teams gecreëerd; controleer je instellingen of probeer andere parameters."
         )
         st.stop()
 
-    # --- Write & display teams ---
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         for i, team in enumerate(all_teams, start=1):
