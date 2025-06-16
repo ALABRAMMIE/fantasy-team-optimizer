@@ -145,18 +145,24 @@ def add_bracket_constraints(prob, xvars):
             prob += lpSum(members) <= 1, f"UniqueBracket_{b}"
 
 def add_usage_caps(prob, xvars):
-    if num_teams <= 1:
-        return
     for p in players:
         nm = p["Name"]
         if nm in include_players:
             continue
-        b = p.get("Bracket")
+
+        b     = p.get("Bracket")
         min_c = bracket_min_count.get(b, 0)
         max_c = bracket_max_count.get(b, num_teams)
+
         used  = sum(1 for prev in prev_sets if nm in prev)
-        prob += (used + xvars[nm] >= min_c, f"MinUse_{nm}")
-        prob += (used + xvars[nm] <= max_c, f"MaxUse_{nm}")
+
+        # ALWAYS enforce min usage:
+        if min_c > 0:
+            prob += (used + xvars[nm] >= min_c, f"MinUse_{nm}")
+
+        # only enforce max usage if more than one team
+        if num_teams > 1 and max_c < num_teams:
+            prob += (used + xvars[nm] <= max_c, f"MaxUse_{nm}")
 
 def add_min_diff(prob, xvars):
     for prev in prev_sets:
