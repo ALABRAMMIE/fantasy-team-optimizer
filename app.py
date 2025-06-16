@@ -8,11 +8,11 @@ st.title("Fantasy Team Optimizer")
 
 # --- Sidebar: Sport & Template ---
 sport_options = [
-    "-- Choose a sport --","Cycling","Speed Skating","Formula 1","Stock Exchange",
-    "Tennis","MotoGP","Football","Darts","Cyclocross","Golf","Snooker",
-    "Olympics","Basketball","Dakar Rally","Skiing","Rugby","Biathlon",
-    "Handball","Cross Country","Baseball","Ice Hockey","American Football",
-    "Ski Jumping","MMA","Entertainment","Athletics"
+    "-- Choose a sport --", "Cycling", "Speed Skating", "Formula 1", "Stock Exchange",
+    "Tennis", "MotoGP", "Football", "Darts", "Cyclocross", "Golf", "Snooker",
+    "Olympics", "Basketball", "Dakar Rally", "Skiing", "Rugby", "Biathlon",
+    "Handball", "Cross Country", "Baseball", "Ice Hockey", "American Football",
+    "Ski Jumping", "MMA", "Entertainment", "Athletics"
 ]
 sport = st.sidebar.selectbox("Select a sport", sport_options)
 if "selected_sport" not in st.session_state:
@@ -63,7 +63,7 @@ ftps_rand_pct = st.sidebar.slider(
     help="± this percent noise on FTPS for teams 2…N"
 )
 
-# --- Upload & edit players ---
+# --- Upload & Edit Players ---
 st.sidebar.markdown("### Upload Players File")
 uploaded_file = st.sidebar.file_uploader("Upload your Excel file (players)", type=["xlsx"])
 if not uploaded_file:
@@ -93,30 +93,20 @@ exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited["Name"])
 
 # collect brackets
 brackets = sorted(edited["Bracket"].dropna().unique())
-bracket_fail = False
 if use_bracket_constraints and not brackets:
     st.sidebar.warning("⚠️ Bracket Constraints on but no ‘Bracket’ column found.")
-    bracket_fail = True
 
-# --- Per-bracket randomness & usage counts ---
-bracket_rand = {}
+# --- Per-Bracket Min/Max count sliders ---
 bracket_min_count = {}
 bracket_max_count = {}
 if brackets:
-    with st.sidebar.expander("FTPS Randomness by Bracket", expanded=False):
-        for b in brackets:
-            bracket_rand[b] = st.slider(
-                f"Bracket {b} FTPS Random %", 0, 100, 0, 5, key=f"rand_{b}"
-            )
     with st.sidebar.expander("Usage Count by Bracket", expanded=False):
         for b in brackets:
             bracket_min_count[b] = st.number_input(
-                f"Bracket {b} Min usage (teams)", min_value=0, max_value=num_teams,
-                value=0, step=1, key=f"minuse_{b}"
+                f"Bracket {b} Min picks per team", 0, team_size, 0, 1, key=f"min_{b}"
             )
             bracket_max_count[b] = st.number_input(
-                f"Bracket {b} Max usage (teams)", min_value=0, max_value=num_teams,
-                value=num_teams, step=1, key=f"maxuse_{b}"
+                f"Bracket {b} Max picks per team", 0, team_size, team_size, 1, key=f"max_{b}"
             )
 
 # --- Read target profile for Closest FTP Match ---
@@ -138,48 +128,41 @@ if solver_mode == "Closest FTP Match" and template_file and format_name:
         st.stop()
 
 # --- Constraint helpers ---
-def add_bracket_constraints(prob, xvars):
-    if use_bracket_constraints and not bracket_fail:
+def add_bracket_constraints(prob, x):
+    if use_bracket_constraints:
         for b in brackets:
-            members = [xvars[p["Name"]] for p in players if p.get("Bracket") == b]
+            members = [x[p["Name"]] for p in players if p.get("Bracket") == b]
             prob += lpSum(members) <= 1, f"UniqueBracket_{b}"
 
-def add_usage_caps(prob, xvars):
-    for p in players:
-        nm = p["Name"]
-        if nm in include_players:
-            continue
+def add_composition_constraints(prob, x):
+    # per-team bracket pick counts
+    for b in brackets:
+        mn = bracket_min_count.get(b, 0)
+        mx = bracket_max_count.get(b, team_size)
+        members = [x[p["Name"]] for p in players if p.get("Bracket") == b]
+        if mn > 0:
+            prob += lpSum(members) >= mn, f"MinBracket_{b}"
+        if mx < team_size:
+            prob += lpSum(members) <= mx, f"MaxBracket_{b}"
 
-        b     = p.get("Bracket")
-        min_c = bracket_min_count.get(b, 0)
-        max_c = bracket_max_count.get(b, num_teams)
-
-        used  = sum(1 for prev in prev_sets if nm in prev)
-
-        # ALWAYS enforce min usage:
-        if min_c > 0:
-            prob += (used + xvars[nm] >= min_c, f"MinUse_{nm}")
-
-        # only enforce max usage if more than one team
-        if num_teams > 1 and max_c < num_teams:
-            prob += (used + xvars[nm] <= max_c, f"MaxUse_{nm}")
-
-def add_min_diff(prob, xvars):
-    for prev in prev_sets:
-        prob += lpSum(xvars[n] for n in prev) <= team_size - diff_count, f"MinDiff_{len(prev_sets)}"
+def add_min_diff(prob, x):
+    # enforce difference from each previous team
+    for idx, prev in enumerate(prev_sets):
+        prob += lpSum(x[n] for n in prev) <= team_size - diff_count, f"MinDiff_{idx}"
 
 # --- Optimize Teams ---
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
     prev_sets  = []
 
-    # -- Budget Usage Mode --
+    # --- Maximize Budget Usage ---
     if solver_mode == "Maximize Budget Usage":
         upper = budget
         for _ in range(num_teams):
             prob = LpProblem("opt_budget", LpMaximize)
             x    = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
+            # objective & core constraints
             prob += lpSum(
                 x[n] * next(q["Value"] for q in players if q["Name"] == n)
                 for n in x
@@ -191,7 +174,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
             ) <= upper
 
             add_bracket_constraints(prob, x)
-            add_usage_caps(prob, x)
+            add_composition_constraints(prob, x)
             add_min_diff(prob, x)
 
             for n in include_players:
@@ -209,16 +192,16 @@ if st.sidebar.button("🚀 Optimize Teams"):
             prev_sets.append({p["Name"] for p in team})
             upper = sum(p["Value"] for p in team) - 0.001
 
-    # -- FTPS Mode --
+    # --- Maximize FTPS ---
     elif solver_mode == "Maximize FTPS":
         for idx in range(num_teams):
+            # FTPS values: raw for team1, noise for 2…N
             if idx == 0:
                 ftps_vals = {p["Name"]: p["base_FTPS"] for p in players}
             else:
                 ftps_vals = {
                     p["Name"]: p["base_FTPS"] * (1 + random.uniform(
-                        -bracket_rand.get(p.get("Bracket"), 0)/100,
-                         bracket_rand.get(p.get("Bracket"), 0)/100
+                        -ftps_rand_pct/100, ftps_rand_pct/100
                     ))
                     for p in players
                 }
@@ -234,7 +217,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
             ) <= budget
 
             add_bracket_constraints(prob, x)
-            add_usage_caps(prob, x)
+            add_composition_constraints(prob, x)
             add_min_diff(prob, x)
 
             for n in include_players:
@@ -254,13 +237,12 @@ if st.sidebar.button("🚀 Optimize Teams"):
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
 
-    # -- Closest FTP Match --
+    # --- Closest FTP Match ---
     else:
         for _ in range(num_teams):
-            slots = [None] * team_size
-            used_brackets = set()
-            used_names    = set()
+            slots, used_brackets, used_names = [None]*team_size, set(), set()
 
+            # place includes
             for n in include_players:
                 p0 = next(p for p in players if p["Name"] == n)
                 diffs = [
@@ -273,6 +255,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 if use_bracket_constraints and p0.get("Bracket"):
                     used_brackets.add(p0["Bracket"])
 
+            # greedy fill
             for i in range(team_size):
                 if slots[i] is not None:
                     continue
@@ -307,7 +290,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
             if len(all_teams) == num_teams:
                 break
 
-    # --- Write & Display ---
+    # --- Output & Download ---
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         for i, team in enumerate(all_teams, start=1):
