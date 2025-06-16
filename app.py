@@ -87,18 +87,22 @@ if use_bracket_constraints and "Bracket" not in edited.columns:
 
 # --- per-bracket slider groups in expanders ---
 brackets = sorted(edited["Bracket"].dropna().unique())
-bracket_rand, bracket_usage = {}, {}
-
+bracket_rand  = {}
+bracket_usage = {}
+bracket_min   = {}
 if brackets:
     with st.sidebar.expander("FTPS Randomness by Bracket", expanded=False):
         for b in brackets:
             bracket_rand[b] = st.slider(
                 f"Bracket {b} FTPS Random %", 0,100,0,5, key=f"rand_{b}"
             )
-    with st.sidebar.expander("Max Usage % by Bracket", expanded=False):
+    with st.sidebar.expander("Usage % by Bracket", expanded=False):
         for b in brackets:
             bracket_usage[b] = st.slider(
                 f"Bracket {b} Max Usage %", 0,100,100,5, key=f"use_{b}"
+            )
+            bracket_min[b] = st.slider(
+                f"Bracket {b} Min Usage %", 0,100,0,5, key=f"minuse_{b}"
             )
 
 # --- target profile for Closest FTP Match ---
@@ -123,22 +127,27 @@ def add_bracket_constraints(prob, xvars):
             prob += lpSum(grp) <= 1
 
 def add_usage_constraints(prob, xvars):
+    # skip for Closest FTP Match or single-team
     if solver_mode == "Closest FTP Match" or num_teams <= 1:
         return
     for p in players:
         nm = p["Name"]
         if nm in include_players:
             continue
-        pct = bracket_usage.get(p.get("Bracket"), global_max_usage)
-        cap = math.floor(num_teams * pct / 100)
-        used = sum(1 for prev in prev_sets if nm in prev)
-        prob += (used + xvars[nm] <= cap, f"Usage_{nm}")
+        pct_max = bracket_usage.get(p.get("Bracket"), global_max_usage)
+        pct_min = bracket_min.get(p.get("Bracket"), 0)
+        cap_max = math.floor(num_teams * pct_max / 100)
+        cap_min = math.ceil (num_teams * pct_min / 100)
+        used    = sum(1 for prev in prev_sets if nm in prev)
+        # enforce min and max usage across teams
+        prob += (used + xvars[nm] <= cap_max, f"MaxUsage_{nm}")
+        prob += (used + xvars[nm] >= cap_min, f"MinUsage_{nm}")
 
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
     prev_sets  = []
 
-    # Maximize Budget Usage
+    # --- Maximize Budget Usage ---
     if solver_mode == "Maximize Budget Usage":
         upper = budget
         for _ in range(num_teams):
@@ -155,13 +164,13 @@ if st.sidebar.button("🚀 Optimize Teams"):
             for prev in prev_sets:
                 prob += lpSum(x[n] for n in prev) <= team_size - diff_count
             prob.solve()
-            team = [{**p, "Adjusted FTPS": p["base_FTPS"]} 
+            team = [{**p, "Adjusted FTPS": p["base_FTPS"]}
                     for p in players if x[p["Name"]].value() == 1]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
             upper = sum(p["Value"] for p in team) - 0.001
 
-    # Maximize FTPS
+    # --- Maximize FTPS ---
     elif solver_mode == "Maximize FTPS":
         for idx in range(num_teams):
             if idx == 0:
@@ -184,12 +193,12 @@ if st.sidebar.button("🚀 Optimize Teams"):
             for prev in prev_sets:
                 prob += lpSum(x[n] for n in prev) <= team_size - diff_count
             prob.solve()
-            team = [{**p, "Adjusted FTPS": ftps_vals[p["Name"]]} 
+            team = [{**p, "Adjusted FTPS": ftps_vals[p["Name"]]}
                     for p in players if x[p["Name"]].value() == 1]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
 
-    # Closest FTP Match (unaffected by randomness or usage)
+    # --- Closest FTP Match (unaffected) ---
     else:
         for _ in range(num_teams):
             slots, used_brackets, used_names = [None]*team_size, set(), set()
@@ -204,8 +213,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     used_brackets.add(p0["Bracket"])
             # greedy fill
             for i in range(team_size):
-                if slots[i] is not None:
-                    continue
+                if slots[i] is not None: continue
                 tgt = target_values[i]
                 cands = [
                     p for p in players
@@ -213,8 +221,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     and p["Name"] not in exclude_players
                     and (not use_bracket_constraints or p.get("Bracket") not in used_brackets)
                 ]
-                if not cands:
-                    break
+                if not cands: break
                 pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
                 slots[i] = pick
                 used_names.add(pick["Name"])
@@ -222,9 +229,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     used_brackets.add(pick["Bracket"])
             cost = sum(p["Value"] for p in slots if p)
             if cost > budget:
-                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")
-                st.stop()
-
+                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f})."); st.stop()
             names_set = {p["Name"] for p in slots if p}
             if all(len(names_set & prev) <= team_size - diff_count for prev in prev_sets):
                 team = [{**p, "Adjusted FTPS": p["base_FTPS"]} for p in slots if p]
@@ -233,7 +238,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 if len(all_teams) == num_teams:
                     break
 
-    # Write & display teams
+    # --- Write & display teams ---
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         for i, team in enumerate(all_teams, start=1):
