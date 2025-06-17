@@ -173,6 +173,7 @@ def add_min_diff(prob, x):
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
     prev_sets = []
+    subs = []
 
     # Maximize Budget Usage
     if solver_mode == "Maximize Budget Usage":
