@@ -142,7 +142,6 @@ def add_bracket_constraints(prob, x):
             prob += lpSum(members) <= 1, f"UniqueBracket_{b}"
 
 def add_composition_constraints(prob, x):
-    # per-team bracket pick counts
     for b in brackets:
         mn = bracket_min_count.get(b, 0)
         mx = bracket_max_count.get(b, team_size)
@@ -179,16 +178,9 @@ if st.sidebar.button("🚀 Optimize Teams"):
             prob = LpProblem("opt_budget", LpMaximize)
             x    = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
 
-            # objective & core constraints
-            prob += lpSum(
-                x[n] * next(q["Value"] for q in players if q["Name"] == n)
-                for n in x
-            )
+            prob += lpSum(x[n] * next(q["Value"] for q in players if q["Name"] == n) for n in x)
             prob += lpSum(x.values()) == team_size
-            prob += lpSum(
-                x[n] * next(q["Value"] for q in players if q["Name"] == n)
-                for n in x
-            ) <= upper
+            prob += lpSum(x[n] * next(q["Value"] for q in players if q["Name"] == n) for n in x) <= upper
 
             add_bracket_constraints(prob, x)
             add_composition_constraints(prob, x)
@@ -217,9 +209,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 ftps_vals = {p["Name"]: p["base_FTPS"] for p in players}
             else:
                 ftps_vals = {
-                    p["Name"]: p["base_FTPS"] * (1 + random.uniform(
-                        -ftps_rand_pct/100, ftps_rand_pct/100
-                    ))
+                    p["Name"]: p["base_FTPS"] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))
                     for p in players
                 }
 
@@ -228,10 +218,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
 
             prob += lpSum(x[n] * ftps_vals[n] for n in x)
             prob += lpSum(x.values()) == team_size
-            prob += lpSum(
-                x[n] * next(q["Value"] for q in players if q["Name"] == n)
-                for n in x
-            ) <= budget
+            prob += lpSum(x[n] * next(q["Value"] for q in players if q["Name"] == n) for n in x) <= budget
 
             add_bracket_constraints(prob, x)
             add_composition_constraints(prob, x)
@@ -248,10 +235,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 st.error("🚫 Infeasible under those constraints.")
                 st.stop()
 
-            team = [
-                {**p, "Adjusted FTPS": ftps_vals[p["Name"]]}
-                for p in players if x[p["Name"]].value() == 1
-            ]
+            team = [{**p, "Adjusted FTPS": ftps_vals[p["Name"]]} for p in players if x[p["Name"]].value() == 1]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
 
@@ -264,10 +248,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
             # place includes
             for n in include_players:
                 p0 = next(p for p in players if p["Name"] == n)
-                diffs = [
-                    (i, abs(p0["Value"] - target_values[i]))
-                    for i in range(team_size) if slots[i] is None
-                ]
+                diffs = [(i, abs(p0["Value"] - target_values[i])) for i in range(team_size) if slots[i] is None]
                 best_i = min(diffs, key=lambda x: x[1])[0]
                 slots[best_i] = p0
                 used_names.add(n)
@@ -285,7 +266,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
                         continue
                     if use_bracket_constraints and p.get("Bracket") in used_brackets:
                         continue
-                    # enforce global cap
                     used = sum(1 for prev in prev_sets if p["Name"] in prev)
                     if p["Name"] not in include_players and used >= cap:
                         continue
@@ -293,7 +273,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 if not cands:
                     st.error("🚫 Infeasible under those constraints.")
                     st.stop()
-                pick = min(cands, key=lambda p: abs(p["Value"] - target_values[i]))
+                pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
                 slots[i] = pick
                 used_names.add(pick["Name"])
                 if use_bracket_constraints and pick.get("Bracket"):
@@ -315,34 +295,29 @@ if st.sidebar.button("🚀 Optimize Teams"):
             if len(all_teams) == num_teams:
                 break
 
-    # --- Output & Download ---
+    # --- Output & Download (merged sheet) ---
+    # build one big table
+    merged = []
+    for idx, team in enumerate(all_teams, start=1):
+        df_t = pd.DataFrame(team)
+        df_t["Team"] = idx
+        df_t["Selectie (%)"] = df_t["Name"].apply(
+            lambda n: round(
+                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                / len(all_teams) * 100, 1
+            )
+        )
+        merged.append(df_t)
+    merged_df = pd.concat(merged, ignore_index=True)
+
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        for i, team in enumerate(all_teams, start=1):
-            df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(
-                lambda n: round(
-                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
-                    / len(all_teams) * 100, 1
-                )
-            )
-            df_t.to_excel(writer, sheet_name=f"Team{i}", index=False)
+        merged_df.to_excel(writer, index=False, sheet_name="All Teams")
     buf.seek(0)
 
-    for i, team in enumerate(all_teams, start=1):
-        with st.expander(f"Team {i}"):
-            df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(
-                lambda n: round(
-                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
-                    / len(all_teams) * 100, 1
-                )
-            )
-            st.dataframe(df_t)
-
+    st.dataframe(merged_df)  # show merged table in-app
     st.download_button(
-        "📥 Download All Teams (Excel)",
-        buf,
+        "📥 Download All Teams (Excel)", buf,
         file_name="all_teams.xlsx",
         mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
     )
