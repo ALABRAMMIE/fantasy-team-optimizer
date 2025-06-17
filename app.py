@@ -63,6 +63,13 @@ ftps_rand_pct = st.sidebar.slider(
     help="± this percent noise on FTPS for teams 2…N"
 )
 
+# --- Global usage cap ---
+global_usage_pct = st.sidebar.slider(
+    "Global Max Usage % per player (across all teams)",
+    0, 100, 100, 5,
+    help="Max fraction of teams any player can appear in (INCLUDE still forces 100%)."
+)
+
 # --- Upload & Edit Players ---
 st.sidebar.markdown("### Upload Players File")
 uploaded_file = st.sidebar.file_uploader("Upload your Excel file (players)", type=["xlsx"])
@@ -145,8 +152,18 @@ def add_composition_constraints(prob, x):
         if mx < team_size:
             prob += lpSum(members) <= mx, f"MaxBracket_{b}"
 
+def add_global_usage_cap(prob, x):
+    if num_teams <= 1:
+        return
+    cap = math.floor(num_teams * global_usage_pct / 100)
+    for p in players:
+        nm = p["Name"]
+        if nm in include_players:
+            continue
+        used = sum(1 for prev in prev_sets if nm in prev)
+        prob += (used + x[nm] <= cap, f"GlobalUse_{nm}")
+
 def add_min_diff(prob, x):
-    # enforce difference from each previous team
     for idx, prev in enumerate(prev_sets):
         prob += lpSum(x[n] for n in prev) <= team_size - diff_count, f"MinDiff_{idx}"
 
@@ -175,6 +192,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
 
             add_bracket_constraints(prob, x)
             add_composition_constraints(prob, x)
+            add_global_usage_cap(prob, x)
             add_min_diff(prob, x)
 
             for n in include_players:
@@ -195,7 +213,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
     # --- Maximize FTPS ---
     elif solver_mode == "Maximize FTPS":
         for idx in range(num_teams):
-            # FTPS values: raw for team1, noise for 2…N
             if idx == 0:
                 ftps_vals = {p["Name"]: p["base_FTPS"] for p in players}
             else:
@@ -218,6 +235,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
 
             add_bracket_constraints(prob, x)
             add_composition_constraints(prob, x)
+            add_global_usage_cap(prob, x)
             add_min_diff(prob, x)
 
             for n in include_players:
@@ -239,6 +257,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
 
     # --- Closest FTP Match ---
     else:
+        cap = math.floor(num_teams * global_usage_pct / 100)
         for _ in range(num_teams):
             slots, used_brackets, used_names = [None]*team_size, set(), set()
 
@@ -260,15 +279,21 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 if slots[i] is not None:
                     continue
                 tgt = target_values[i]
-                cands = [
-                    p for p in players
-                    if p["Name"] not in used_names
-                    and p["Name"] not in exclude_players
-                    and (not use_bracket_constraints or p.get("Bracket") not in used_brackets)
-                ]
+                cands = []
+                for p in players:
+                    if p["Name"] in used_names or p["Name"] in exclude_players:
+                        continue
+                    if use_bracket_constraints and p.get("Bracket") in used_brackets:
+                        continue
+                    # enforce global cap
+                    used = sum(1 for prev in prev_sets if p["Name"] in prev)
+                    if p["Name"] not in include_players and used >= cap:
+                        continue
+                    cands.append(p)
                 if not cands:
-                    break
-                pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
+                    st.error("🚫 Infeasible under those constraints.")
+                    st.stop()
+                pick = min(cands, key=lambda p: abs(p["Value"] - target_values[i]))
                 slots[i] = pick
                 used_names.add(pick["Name"])
                 if use_bracket_constraints and pick.get("Bracket"):
