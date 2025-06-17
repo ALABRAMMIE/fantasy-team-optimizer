@@ -189,30 +189,55 @@ if st.sidebar.button("🚀 Optimize Teams"):
             subs=[p for p in rem if xs[p['Name']].value()==1]
     # Other solvers omitted for brevity
 
-    # Prepare output
-    output_records=[]
-    for idx,team in enumerate(all_teams, start=1):
+        # Prepare output
+    output_records = []
+    for idx, team in enumerate(all_teams, start=1):
         for p in team:
-            rec=p.copy(); rec['Team']=idx; rec['Role']='Main'; output_records.append(rec)
+            rec = p.copy()
+            rec['Team'] = idx
+            rec['Role'] = 'Main'
+            output_records.append(rec)
     if subs:
-        sub_idx=len(all_teams)+1
+        sub_idx = len(all_teams) + 1
         for p in subs:
-            rec=p.copy(); rec['Team']=sub_idx; rec['Role']='Substitute'; output_records.append(rec)
+            rec = p.copy()
+            rec['Team'] = sub_idx
+            rec['Role'] = 'Substitute'
+            output_records.append(rec)
 
-    # Display Teams
-    for idx in range(1,len(all_teams)+1):
+    # Display each team, integrating substitutes into Team 1 expander
+    for idx in range(1, len(all_teams) + 1):
         with st.expander(f"Team {idx}"):
-            # main and for team1 subs below
-            records=[r for r in output_records if r['Team']==idx]
-            if idx==1 and subs: records+=[r for r in output_records if r['Role']=='Substitute']
-            df_t=pd.DataFrame(records)
-            df_t['Selectie (%)']=df_t['Name'].apply(
-                lambda n: round(sum(1 for r in output_records if r['Name']==n and r['Role']=='Main')/len(all_teams)*100,1)
+            # main picks
+            records = [r for r in output_records if r['Team'] == idx and r['Role'] == 'Main']
+            # add substitutes under Team 1
+            if idx == 1 and subs:
+                records += [r for r in output_records if r['Role'] == 'Substitute']
+            df_t = pd.DataFrame(records)
+            df_t['Selectie (%)'] = df_t['Name'].apply(
+                lambda n: round(
+                    sum(1 for r in output_records if r['Name'] == n and r['Role'] == 'Main')
+                    / len(all_teams) * 100,
+                    1
+                )
             )
-            def hl(row): return ['background-color: lightyellow' if row['Role']=='Substitute' else '' for _ in row]
-            st.dataframe(df_t.style.apply(hl,axis=1))
+            # highlight subs
+            def highlight_role(row):
+                return ['background-color: lightyellow' if row['Role'] == 'Substitute' else '' for _ in row]
+            st.dataframe(df_t.style.apply(highlight_role, axis=1))
 
-    # Download
+    # Download combined sheet
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        pd.DataFrame(output_records).to_excel(writer, sheet_name="All Teams", index=False)
+    buf.seek(0)
+    st.download_button(
+        "📥 Download All Teams (Excel)",
+        buf,
+        file_name="all_teams.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
     buf=BytesIO()
     with pd.ExcelWriter(buf,engine='openpyxl') as writer:
         pd.DataFrame(output_records).to_excel(writer,sheet_name="All Teams",index=False)
