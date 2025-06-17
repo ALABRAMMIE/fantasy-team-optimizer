@@ -196,7 +196,21 @@ if st.sidebar.button("🚀 Optimize Teams"):
             else:df_t=df_main
             df_t['Selectie (%)']=df_t['Name'].apply(lambda n:round(sum(1 for t in all_teams if any(p['Name']==n for p in t))/len(all_teams)*100,1))
             st.dataframe(df_t.style.apply(lambda r:['background-color: lightyellow' if r['Role']=='Sub' else '' for _ in r],axis=1))
-    # --- Download ---
+        # --- Display Tour Substitutes (if any) ---
+    if subs:
+        with st.expander("Tour Substitutes"):
+            df_subs = pd.DataFrame(subs)
+            df_subs["Role"] = "Substitute"
+            df_subs["Selectie (%)"] = df_subs["Name"].apply(
+                lambda n: round(
+                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                    / len(all_teams) * 100,
+                    1
+                )
+            )
+            st.dataframe(df_subs)
+
+# --- Download ---
     merged=[]
     for idx,team in enumerate(all_teams,1):
         df_t=pd.DataFrame(team);df_t['Team']=idx;merged.append(df_t)
