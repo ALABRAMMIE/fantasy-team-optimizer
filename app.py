@@ -14,6 +14,7 @@ sport_options = [
     "Handball", "Cross Country", "Baseball", "Ice Hockey", "American Football",
     "Ski Jumping", "MMA", "Entertainment", "Athletics"
 ]
+
 sport = st.sidebar.selectbox("Select a sport", sport_options)
 if "selected_sport" not in st.session_state:
     st.session_state.selected_sport = sport
@@ -44,6 +45,7 @@ if format_name:
     m = re.search(r"\((\d+)\)", format_name)
     if m:
         default_team_size = int(m.group(1))
+teamsize_key = default_team_size
 team_size = st.sidebar.number_input(
     "Team Size", min_value=1, value=default_team_size, step=1
 )
@@ -271,7 +273,8 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 st.stop()
 
             team = [
-                {**p, "Adjusted FTPS": ftps_vals[p["Name"]]} for p in players if x[p["Name"].value() == 1
+                {**p, "Adjusted FTPS": ftps_vals[p["Name"]]}
+                for p in players if x[p["Name"]].value() == 1
             ]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
@@ -314,3 +317,31 @@ if st.sidebar.button("🚀 Optimize Teams"):
             cost = sum(p["Value"] for p in slots if p)
             if cost > budget:
                 st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")
+                st.stop()
+
+            team = [p for p in slots if p]
+            all_teams.append(team)
+            prev_sets.append({p["Name"] for p in team})
+
+    # display and download
+    for i, team in enumerate(all_teams, start=1):
+        with st.expander(f"Team {i}"):
+            df_t = pd.DataFrame(team)
+            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(
+                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                / len(all_teams)*100,1))
+            st.dataframe(df_t)
+
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        for i, team in enumerate(all_teams, start=1):
+            df_t = pd.DataFrame(team)
+            df_t["Selectie (%)"] = df_t["Name"].apply(lambda n: round(
+                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                / len(all_teams)*100,1))
+            df_t.to_excel(writer, sheet_name=f"Team{i}", index=False)
+    buf.seek(0)
+
+    st.download_button("📥 Download All Teams (Excel)", buf,
+                        file_name="all_teams.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
