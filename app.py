@@ -295,19 +295,8 @@ if st.sidebar.button("🚀 Optimize Teams"):
             if len(all_teams) == num_teams:
                 break
 
-    # --- Display each team separately ---
-    for i, team in enumerate(all_teams, start=1):
-        with st.expander(f"Team {i}"):
-            df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(
-                lambda n: round(
-                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
-                    / len(all_teams) * 100, 1
-                )
-            )
-            st.dataframe(df_t)
-
-    # --- Build merged DataFrame only for download ---
+    # --- Output & Download (merged sheet) ---
+    # build one big table
     merged = []
     for idx, team in enumerate(all_teams, start=1):
         df_t = pd.DataFrame(team)
@@ -321,15 +310,14 @@ if st.sidebar.button("🚀 Optimize Teams"):
         merged.append(df_t)
     merged_df = pd.concat(merged, ignore_index=True)
 
-    # --- Download button writes merged_df to a single-sheet Excel ---
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         merged_df.to_excel(writer, index=False, sheet_name="All Teams")
     buf.seek(0)
 
+    st.dataframe(merged_df)  # show merged table in-app
     st.download_button(
-        "📥 Download All Teams (Excel)",
-        buf,
+        "📥 Download All Teams (Excel)", buf,
         file_name="all_teams.xlsx",
         mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
     )
