@@ -303,8 +303,8 @@ if st.sidebar.button("🚀 Optimize Teams"):
             )
             st.dataframe(df_t)
 
-    # --- Display substitutes ---
-    if tour_mode and sport == 'Cycling':
+        # --- Display substitutes ---
+    if tour_mode and sport == 'Cycling' and subs:
         with st.expander("🔄 Tour Substitutes"):
             df_s = pd.DataFrame([r for r in output_records if r['Role'] == 'Substitute'])
             df_s['Selectie (%)'] = df_s['Name'].apply(
