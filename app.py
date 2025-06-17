@@ -142,7 +142,6 @@ def add_bracket_constraints(prob, x):
             prob += lpSum(members) <= 1, f"UniqueBracket_{b}"
 
 def add_composition_constraints(prob, x):
-    # per-team bracket pick counts
     for b in brackets:
         mn = bracket_min_count.get(b, 0)
         mx = bracket_max_count.get(b, team_size)
@@ -236,10 +235,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 st.error("🚫 Infeasible under those constraints.")
                 st.stop()
 
-            team = [
-                {**p, "Adjusted FTPS": ftps_vals[p["Name"]] }
-                for p in players if x[p["Name"]].value() == 1
-            ]
+            team = [{**p, "Adjusted FTPS": ftps_vals[p["Name"]]} for p in players if x[p["Name"]].value() == 1]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
 
@@ -252,10 +248,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
             # place includes
             for n in include_players:
                 p0 = next(p for p in players if p["Name"] == n)
-                diffs = [
-                    (i, abs(p0["Value"] - target_values[i]))
-                    for i in range(team_size) if slots[i] is None
-                ]
+                diffs = [(i, abs(p0["Value"] - target_values[i])) for i in range(team_size) if slots[i] is None]
                 best_i = min(diffs, key=lambda x: x[1])[0]
                 slots[best_i] = p0
                 used_names.add(n)
@@ -288,12 +281,12 @@ if st.sidebar.button("🚀 Optimize Teams"):
 
             cost = sum(p["Value"] for p in slots if p)
             if cost > budget:
-                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")  
+                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")
                 st.stop()
 
             current = {p["Name"] for p in slots if p}
             if prev_sets and len(current & prev_sets[-1]) > team_size - diff_count:
-                st.error("🚫 Violation of min-difference constraint.")  
+                st.error("🚫 Violation of min-difference constraint.")
                 st.stop()
 
             team = [{**p, "Adjusted FTPS": p["base_FTPS"]} for p in slots if p]
@@ -314,18 +307,24 @@ if st.sidebar.button("🚀 Optimize Teams"):
             )
             st.dataframe(df_t)
 
-    # --- Download all teams as separate sheets ---
+    # --- Build merged DataFrame only for download ---
+    merged = []
+    for idx, team in enumerate(all_teams, start=1):
+        df_t = pd.DataFrame(team)
+        df_t["Team"] = idx
+        df_t["Selectie (%)"] = df_t["Name"].apply(
+            lambda n: round(
+                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                / len(all_teams) * 100, 1
+            )
+        )
+        merged.append(df_t)
+    merged_df = pd.concat(merged, ignore_index=True)
+
+    # --- Download button writes merged_df to a single-sheet Excel ---
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        for i, team in enumerate(all_teams, start=1):
-            df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(
-                lambda n: round(
-                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
-                    / len(all_teams) * 100, 1
-                )
-            )
-            df_t.to_excel(writer, sheet_name=f"Team{i}", index=False)
+        merged_df.to_excel(writer, index=False, sheet_name="All Teams")
     buf.seek(0)
 
     st.download_button(
