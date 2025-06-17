@@ -123,10 +123,7 @@ if solver_mode == "Closest FTP Match" and template_file and format_name:
     try:
         prof = pd.read_excel(template_file, sheet_name=format_name, header=None)
         raw = prof.iloc[:, 0].dropna().tolist()
-        vals = [
-            float(x) for x in raw
-            if isinstance(x, (int, float)) or str(x).replace(".", "", 1).isdigit()
-        ]
+        vals = [float(x) for x in raw if isinstance(x, (int, float)) or str(x).replace(".", "", 1).isdigit()]
         if len(vals) < team_size:
             st.error(f"❌ Profile has fewer than {team_size} rows.")
             st.stop()
@@ -204,14 +201,14 @@ if st.sidebar.button("🚀 Optimize Teams"):
             prev_sets.append({p["Name"] for p in team})
             upper = sum(p["Value"] for p in team) - 0.001
 
-        # Tour substitutes (Cycling)
+        # Tour substitutes (Cycling) under Team 1
         if sport == "Cycling":
             rem = [p for p in players if all(p["Name"] not in s for s in prev_sets)]
             prob = LpProblem("tour_subs", LpMaximize)
             xs = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in rem}
 
             prob += lpSum(xs[n] * next(q["Value"] for q in rem if q["Name"] == n) for n in xs)
-            prob += lpSum(xs.values()) == ftps_rand_pct  # Reuse slider as team size for subs
+            prob += lpSum(xs.values()) == ftps_rand_pct
             prob += lpSum(xs[n] * next(q["Value"] for q in rem if q["Name"] == n) for n in xs) <= budget * 0.2
 
             prob.solve()
@@ -250,70 +247,4 @@ if st.sidebar.button("🚀 Optimize Teams"):
 
             team = [{**p, "Adjusted FTPS": ftps_vals[p["Name"]]} for p in players if x[p["Name"]].value() == 1]
             all_teams.append(team)
-            prev_sets.append({p["Name"] for p in team})
-
-    # --- Closest FTP Match ---
-    else:
-        cap = math.floor(num_teams * global_usage_pct / 100)
-        for _ in range(num_teams):
-            slots, used_brackets, used_names = [None]*team_size, set(), set()
-
-            # place includes
-            for n in include_players:
-                p0 = next(p for p in players if p["Name"] == n)
-                diffs = [(i, abs(p0["Value"] - target_values[i])) for i in range(team_size) if slots[i] is None]
-                best_i = min(diffs, key=lambda x: x[1])[0]
-                slots[best_i] = p0
-                used_names.add(n)
-                if use_bracket_constraints and p0.get("Bracket"):
-                    used_brackets.add(p0["Bracket"])
-
-            # greedy fill
-            for i in range(team_size):
-                if slots[i] is not None:
-                    continue
-                tgt = target_values[i]
-                cands = [p for p in players
-                         if p["Name"] not in used_names and p["Name"] not in exclude_players
-                         and (not use_bracket_constraints or p.get("Bracket") not in used_brackets)
-                         and (p["Name"] in include_players or sum(1 for s in prev_sets if p["Name"] in s) < cap)]
-                if not cands:
-                    st.error("🚫 Infeasible under those constraints.")
-                    st.stop()
-                pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
-                slots[i] = pick
-                used_names.add(pick["Name"])
-                if use_bracket_constraints and pick.get("Bracket"):
-                    used_brackets.add(pick["Bracket"])
-
-            cost = sum(p["Value"] for p in slots if p)
-            if cost > budget:
-                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")
-                st.stop()
-
-            current = {p["Name"] for p in slots if p}
-            if prev_sets and len(current & prev_sets[-1]) > team_size - diff_count:
-                st.error("🚫 Violation of min-difference constraint.")
-                st.stop()
-
-            team = [{**p, "Adjusted FTPS": p["base_FTPS"]} for p in slots if p]
-            all_teams.append(team)
-            prev_sets.append(current)
-            if len(all_teams) == num_teams:
-                break
-
-    # --- Display each team separately, including subs under Team 1 ---
-    for i, team in enumerate(all_teams, start=1):
-        with st.expander(f"Team {i}"):
-            main_df = pd.DataFrame(team)
-            main_df["Selectie (%)"] = main_df["Name"].apply(
-                lambda n: round(
-                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
-                    / len(all_teams) * 100, 1
-                )
-            )
-            if i == 1 and subs:
-                subs_df = pd.DataFrame(subs)
-                subs_df["Selectie (%)"] = subs_df["Name"].apply(
-                    lambda n: round(
-                        sum(1 for t in all_teams if any(p["Name"] ==
+            prev_sets.append({p["Name"] for p in team})
