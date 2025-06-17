@@ -14,6 +14,7 @@ sport_options = [
     "Handball", "Cross Country", "Baseball", "Ice Hockey", "American Football",
     "Ski Jumping", "MMA", "Entertainment", "Athletics"
 ]
+
 sport = st.sidebar.selectbox("Select a sport", sport_options)
 if "selected_sport" not in st.session_state:
     st.session_state.selected_sport = sport
@@ -170,6 +171,7 @@ def add_min_diff(prob, x):
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
     prev_sets  = []
+    subs = []
 
     # --- Maximize Budget Usage ---
     if solver_mode == "Maximize Budget Usage":
@@ -202,16 +204,27 @@ if st.sidebar.button("🚀 Optimize Teams"):
             prev_sets.append({p["Name"] for p in team})
             upper = sum(p["Value"] for p in team) - 0.001
 
+        # Tour substitutes (Cycling)
+        if sport == "Cycling":
+            rem = [p for p in players if all(p["Name"] not in s for s in prev_sets)]
+            prob = LpProblem("tour_subs", LpMaximize)
+            xs = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in rem}
+
+            prob += lpSum(xs[n] * next(q["Value"] for q in rem if q["Name"] == n) for n in xs)
+            prob += lpSum(xs.values()) == ftps_rand_pct  # Reuse slider as team size for subs
+            prob += lpSum(xs[n] * next(q["Value"] for q in rem if q["Name"] == n) for n in xs) <= budget * 0.2
+
+            prob.solve()
+            subs = [p for p in rem if xs[p["Name"]].value() == 1]
+
     # --- Maximize FTPS ---
     elif solver_mode == "Maximize FTPS":
         for idx in range(num_teams):
             if idx == 0:
                 ftps_vals = {p["Name"]: p["base_FTPS"] for p in players}
             else:
-                ftps_vals = {
-                    p["Name"]: p["base_FTPS"] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))
-                    for p in players
-                }
+                ftps_vals = {p["Name"]: p["base_FTPS"] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))
+                            for p in players}
 
             prob = LpProblem(f"opt_ftps_{idx}", LpMaximize)
             x    = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
@@ -260,16 +273,10 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 if slots[i] is not None:
                     continue
                 tgt = target_values[i]
-                cands = []
-                for p in players:
-                    if p["Name"] in used_names or p["Name"] in exclude_players:
-                        continue
-                    if use_bracket_constraints and p.get("Bracket") in used_brackets:
-                        continue
-                    used = sum(1 for prev in prev_sets if p["Name"] in prev)
-                    if p["Name"] not in include_players and used >= cap:
-                        continue
-                    cands.append(p)
+                cands = [p for p in players
+                         if p["Name"] not in used_names and p["Name"] not in exclude_players
+                         and (not use_bracket_constraints or p.get("Bracket") not in used_brackets)
+                         and (p["Name"] in include_players or sum(1 for s in prev_sets if p["Name"] in s) < cap)]
                 if not cands:
                     st.error("🚫 Infeasible under those constraints.")
                     st.stop()
@@ -295,41 +302,18 @@ if st.sidebar.button("🚀 Optimize Teams"):
             if len(all_teams) == num_teams:
                 break
 
-    # --- Display each team separately ---
+    # --- Display each team separately, including subs under Team 1 ---
     for i, team in enumerate(all_teams, start=1):
         with st.expander(f"Team {i}"):
-            df_t = pd.DataFrame(team)
-            df_t["Selectie (%)"] = df_t["Name"].apply(
+            main_df = pd.DataFrame(team)
+            main_df["Selectie (%)"] = main_df["Name"].apply(
                 lambda n: round(
                     sum(1 for t in all_teams if any(p["Name"] == n for p in t))
                     / len(all_teams) * 100, 1
                 )
             )
-            st.dataframe(df_t)
-
-    # --- Build merged DataFrame only for download ---
-    merged = []
-    for idx, team in enumerate(all_teams, start=1):
-        df_t = pd.DataFrame(team)
-        df_t["Team"] = idx
-        df_t["Selectie (%)"] = df_t["Name"].apply(
-            lambda n: round(
-                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
-                / len(all_teams) * 100, 1
-            )
-        )
-        merged.append(df_t)
-    merged_df = pd.concat(merged, ignore_index=True)
-
-    # --- Download button writes merged_df to a single-sheet Excel ---
-    buf = BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        merged_df.to_excel(writer, index=False, sheet_name="All Teams")
-    buf.seek(0)
-
-    st.download_button(
-        "📥 Download All Teams (Excel)",
-        buf,
-        file_name="all_teams.xlsx",
-        mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
-    )
+            if i == 1 and subs:
+                subs_df = pd.DataFrame(subs)
+                subs_df["Selectie (%)"] = subs_df["Name"].apply(
+                    lambda n: round(
+                        sum(1 for t in all_teams if any(p["Name"] ==
