@@ -52,7 +52,7 @@ solver_mode = st.sidebar.radio(
     "Solver Objective",
     ["Maximize FTPS", "Maximize Budget Usage", "Closest FTP Match"]
 )
-num_teams  = st.sidebar.number_input("Number of Teams", min_value=1, max_value=25, value=1)
+num_teams  = st.sidebar.number_input("Number of Teams", min_value=1, max_value=100, value=1)
 diff_count = st.sidebar.number_input(
     "Min Verschil tussen Teams (aantal spelers)", min_value=0, max_value=team_size, value=1
 )
