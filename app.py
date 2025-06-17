@@ -187,30 +187,30 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 pick=min(cands,key=lambda p:abs(p['Value']-tgt));slots[i]=pick;un.add(pick['Name']);ub.add(pick['Bracket']) if use_bracket_constraints and pick.get('Bracket') else None
             team=[p for p in slots if p];all_teams.append(team);prev_sets.append({p['Name'] for p in team})
     # --- Display ---
-    for i,team in enumerate(all_teams,1):
+        # --- Display each team separately ---
+    for i, team in enumerate(all_teams, start=1):
         with st.expander(f"Team {i}"):
-            df_main=pd.DataFrame(team);df_main['Role']='Main'
-            if i==1 and subs:
-                df_sub=pd.DataFrame(subs);df_sub['Role']='Sub'
-                df_t=pd.concat([df_main,df_sub],ignore_index=True)
-            else:df_t=df_main
-            df_t['Selectie (%)']=df_t['Name'].apply(lambda n:round(sum(1 for t in all_teams if any(p['Name']==n for p in t))/len(all_teams)*100,1))
-            st.dataframe(df_t.style.apply(lambda r:['background-color: lightyellow' if r['Role']=='Sub' else '' for _ in r],axis=1))
-            # --- Display Tour Substitutes ---
-    if sport == "Cycling" and tour_mode and subs:
-        with st.expander("Tour Substitutes"):
-            df_subs = pd.DataFrame(subs)
-            df_subs["Role"] = "Substitute"
-            df_subs["Selectie (%)"] = df_subs["Name"].apply(
+            df_main = pd.DataFrame(team)
+            df_main['Role'] = 'Main'
+            # merge substitutes under team 1
+            if i == 1 and subs:
+                df_sub = pd.DataFrame(subs)
+                df_sub['Role'] = 'Substitute'
+                df_t = pd.concat([df_main, df_sub], ignore_index=True)
+            else:
+                df_t = df_main
+            df_t['Selectie (%)'] = df_t['Name'].apply(
                 lambda n: round(
-                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                    sum(1 for t in all_teams if any(p['Name'] == n for p in t))
                     / len(all_teams) * 100,
                     1
                 )
             )
-            st.dataframe(df_subs)
+            def highlight(row):
+                return ['background-color: lightyellow' if row['Role'] == 'Substitute' else '' for _ in row]
+            st.dataframe(df_t.style.apply(highlight, axis=1))
 
-# --- Download ---
+    # --- Download ---
     merged=[]
     for idx,team in enumerate(all_teams,1):
         df_t=pd.DataFrame(team);df_t['Team']=idx;merged.append(df_t)
