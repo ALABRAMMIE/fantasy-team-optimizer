@@ -255,23 +255,30 @@ if st.sidebar.button("🚀 Optimize Teams"):
     # --- Display each team separately ---
     for i, team in enumerate(all_teams, start=1):
         with st.expander(f"Team {i}"):
-            df_t = pd.DataFrame(team)
-            df_t["Role"] = "Main"
+            # main squad
+            df_main = pd.DataFrame(team)
+            df_main["Role"] = "Main"
+            # include substitutes under Team 1
             if i == 1 and subs:
                 df_sub = pd.DataFrame(subs)
                 df_sub["Role"] = "Substitute"
-                df_t = pd.concat([df_t, df_sub], ignore_index=True)
+                df_t = pd.concat([df_main, df_sub], ignore_index=True)
+            else:
+                df_t = df_main
+            # accurate selection % calculation
             df_t["Selectie (%)"] = df_t["Name"].apply(
                 lambda n: round(
-                    sum(n in [p["Name"] for t in all_teams for p in t])
-                    / (len(all_teams)*team_size) * 100, 1
+                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                    / len(all_teams) * 100,
+                    1
                 )
             )
-            def hl(r):
-                return ['background-color: lightyellow' if r['Role']=='Substitute' else '' for _ in r]
-            st.dataframe(df_t.style.apply(hl, axis=1))
+            # highlight subs
+            def highlight(row):
+                return ["background-color: lightyellow" if row["Role"] == "Substitute" else "" for _ in row]
+            st.dataframe(df_t.style.apply(highlight, axis=1))
 
-    # --- Build merged DataFrame only for download ---
+# --- Build merged DataFrame only for download ---
     merged = []
     for idx, team in enumerate(all_teams, start=1):
         df_t = pd.DataFrame(team)
