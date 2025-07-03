@@ -34,7 +34,7 @@ if template_file:
         available_formats = [s for s in xl.sheet_names if s.startswith(sport)]
         if available_formats:
             format_name = st.sidebar.selectbox("Select Format", available_formats)
-    except Exception:
+    except:
         st.sidebar.warning("⚠️ Unable to read template.")
 
 # --- Core constraints ---
@@ -83,12 +83,10 @@ except Exception as e:
     st.error(f"❌ Failed to read players file: {e}")
     st.stop()
 
-# Ensure necessary columns
 if not {"Name", "Value"}.issubset(df.columns):
     st.error("❌ File must include 'Name' and 'Value'.")
     st.stop()
 
-# Data editor for FTPS, Position, Bracket
 st.subheader("📋 Edit Player Data")
 cols = ["Name", "Value"] + [c for c in ("Position", "FTPS", "Bracket") if c in df.columns]
 edited = st.data_editor(df[cols], use_container_width=True)
@@ -100,37 +98,25 @@ players = edited.to_dict("records")
 include_players = st.sidebar.multiselect("Players to INCLUDE", edited["Name"])
 exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited["Name"])
 
-# collect brackets & positions
+# collect brackets
 brackets = sorted(edited["Bracket"].dropna().unique())
-positions = sorted(edited["Position"].dropna().unique())
+if use_bracket_constraints and not brackets:
+    st.sidebar.warning("⚠️ Bracket Constraints on but no ‘Bracket’ column found.")
 
-# Sidebar constraints: positions
-position_min_count = {}
-position_max_count = {}
-if positions:
-    st.sidebar.markdown("### Usage Count by Position")
-    for pos in positions:
-        position_min_count[pos] = st.sidebar.number_input(
-            f"Position {pos} Min picks per team", 0, team_size, 0, 1, key=f"minpos_{pos}"
-        )
-        position_max_count[pos] = st.sidebar.number_input(
-            f"Position {pos} Max picks per team", 0, team_size, team_size, 1, key=f"maxpos_{pos}"
-        )
-
-# Sidebar constraints: brackets
+# --- Per-Bracket Min/Max count sliders ---
 bracket_min_count = {}
 bracket_max_count = {}
 if brackets:
     with st.sidebar.expander("Usage Count by Bracket", expanded=False):
         for b in brackets:
-            bracket_min_count[b] = st.sidebar.number_input(
+            bracket_min_count[b] = st.number_input(
                 f"Bracket {b} Min picks per team", 0, team_size, 0, 1, key=f"min_{b}"
             )
-            bracket_max_count[b] = st.sidebar.number_input(
+            bracket_max_count[b] = st.number_input(
                 f"Bracket {b} Max picks per team", 0, team_size, team_size, 1, key=f"max_{b}"
             )
 
-# Read target profile for Closest FTP Match
+# --- Read target profile for Closest FTP Match ---
 target_values = None
 if solver_mode == "Closest FTP Match" and template_file and format_name:
     try:
@@ -153,16 +139,17 @@ def add_bracket_constraints(prob, x):
     if use_bracket_constraints:
         for b in brackets:
             members = [x[p["Name"]] for p in players if p.get("Bracket") == b]
-            prob += lpSum(members) <= bracket_max_count.get(b, team_size), f"MaxBracket_{b}"
-            if bracket_min_count.get(b, 0) > 0:
-                prob += lpSum(members) >= bracket_min_count[b], f"MinBracket_{b}"
+            prob += lpSum(members) <= 1, f"UniqueBracket_{b}"
 
-def add_position_constraints(prob, x):
-    for pos in positions:
-        members = [x[p["Name"]] for p in players if p.get("Position") == pos]
-        prob += lpSum(members) <= position_max_count.get(pos, team_size), f"MaxPos_{pos}"
-        if position_min_count.get(pos, 0) > 0:
-            prob += lpSum(members) >= position_min_count[pos], f"MinPos_{pos}"
+def add_composition_constraints(prob, x):
+    for b in brackets:
+        mn = bracket_min_count.get(b, 0)
+        mx = bracket_max_count.get(b, team_size)
+        members = [x[p["Name"]] for p in players if p.get("Bracket") == b]
+        if mn > 0:
+            prob += lpSum(members) >= mn, f"MinBracket_{b}"
+        if mx < team_size:
+            prob += lpSum(members) <= mx, f"MaxBracket_{b}"
 
 def add_global_usage_cap(prob, x):
     if num_teams <= 1:
@@ -182,19 +169,21 @@ def add_min_diff(prob, x):
 # --- Optimize Teams ---
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
-    prev_sets = []
+    prev_sets  = []
 
+    # --- Maximize Budget Usage ---
     if solver_mode == "Maximize Budget Usage":
         upper = budget
         for _ in range(num_teams):
             prob = LpProblem("opt_budget", LpMaximize)
-            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+            x    = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+
             prob += lpSum(x[n] * next(q["Value"] for q in players if q["Name"] == n) for n in x)
             prob += lpSum(x.values()) == team_size
             prob += lpSum(x[n] * next(q["Value"] for q in players if q["Name"] == n) for n in x) <= upper
 
             add_bracket_constraints(prob, x)
-            add_position_constraints(prob, x)
+            add_composition_constraints(prob, x)
             add_global_usage_cap(prob, x)
             add_min_diff(prob, x)
 
@@ -204,22 +193,35 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 prob += x[n] == 0
 
             prob.solve()
+            if prob.status != 1:
+                st.error("🚫 Infeasible under those constraints.")
+                st.stop()
+
             team = [p for p in players if x[p["Name"]].value() == 1]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
             upper = sum(p["Value"] for p in team) - 0.001
 
+    # --- Maximize FTPS ---
     elif solver_mode == "Maximize FTPS":
         for idx in range(num_teams):
-            ftps_vals = {p["Name"]: (p["base_FTPS"] if idx == 0 else p["base_FTPS"] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))) for p in players}
+            if idx == 0:
+                ftps_vals = {p["Name"]: p["base_FTPS"] for p in players}
+            else:
+                ftps_vals = {
+                    p["Name"]: p["base_FTPS"] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))
+                    for p in players
+                }
+
             prob = LpProblem(f"opt_ftps_{idx}", LpMaximize)
-            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+            x    = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+
             prob += lpSum(x[n] * ftps_vals[n] for n in x)
             prob += lpSum(x.values()) == team_size
             prob += lpSum(x[n] * next(q["Value"] for q in players if q["Name"] == n) for n in x) <= budget
 
             add_bracket_constraints(prob, x)
-            add_position_constraints(prob, x)
+            add_composition_constraints(prob, x)
             add_global_usage_cap(prob, x)
             add_min_diff(prob, x)
 
@@ -229,40 +231,105 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 prob += x[n] == 0
 
             prob.solve()
+            if prob.status != 1:
+                st.error("🚫 Infeasible under those constraints.")
+                st.stop()
+
             team = [{**p, "Adjusted FTPS": ftps_vals[p["Name"]]} for p in players if x[p["Name"]].value() == 1]
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
 
+    # --- Closest FTP Match ---
     else:
         cap = math.floor(num_teams * global_usage_pct / 100)
         for _ in range(num_teams):
-            slots = [None] * team_size
-            used_brackets, used_names = set(), set()
-            # include logic...
-            # greedy fill logic...
-            # same bracket & position & diff checks
-            team = slots  # simplified for brevity
-            all_teams.append(team)
-            prev_sets.append({p["Name"] for p in team})
+            slots, used_brackets, used_names = [None]*team_size, set(), set()
 
-    # Display and download logic unchanged
+            # place includes
+            for n in include_players:
+                p0 = next(p for p in players if p["Name"] == n)
+                diffs = [(i, abs(p0["Value"] - target_values[i])) for i in range(team_size) if slots[i] is None]
+                best_i = min(diffs, key=lambda x: x[1])[0]
+                slots[best_i] = p0
+                used_names.add(n)
+                if use_bracket_constraints and p0.get("Bracket"):
+                    used_brackets.add(p0["Bracket"])
+
+            # greedy fill
+            for i in range(team_size):
+                if slots[i] is not None:
+                    continue
+                tgt = target_values[i]
+                cands = []
+                for p in players:
+                    if p["Name"] in used_names or p["Name"] in exclude_players:
+                        continue
+                    if use_bracket_constraints and p.get("Bracket") in used_brackets:
+                        continue
+                    used = sum(1 for prev in prev_sets if p["Name"] in prev)
+                    if p["Name"] not in include_players and used >= cap:
+                        continue
+                    cands.append(p)
+                if not cands:
+                    st.error("🚫 Infeasible under those constraints.")
+                    st.stop()
+                pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
+                slots[i] = pick
+                used_names.add(pick["Name"])
+                if use_bracket_constraints and pick.get("Bracket"):
+                    used_brackets.add(pick["Bracket"])
+
+            cost = sum(p["Value"] for p in slots if p)
+            if cost > budget:
+                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")
+                st.stop()
+
+            current = {p["Name"] for p in slots if p}
+            if prev_sets and len(current & prev_sets[-1]) > team_size - diff_count:
+                st.error("🚫 Violation of min-difference constraint.")
+                st.stop()
+
+            team = [{**p, "Adjusted FTPS": p["base_FTPS"]} for p in slots if p]
+            all_teams.append(team)
+            prev_sets.append(current)
+            if len(all_teams) == num_teams:
+                break
+
+    # --- Display each team separately ---
+    for i, team in enumerate(all_teams, start=1):
+        with st.expander(f"Team {i}"):
+            df_t = pd.DataFrame(team)
+            df_t["Selectie (%)"] = df_t["Name"].apply(
+                lambda n: round(
+                    sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                    / len(all_teams) * 100, 1
+                )
+            )
+            st.dataframe(df_t)
+
+    # --- Build merged DataFrame only for download ---
     merged = []
     for idx, team in enumerate(all_teams, start=1):
         df_t = pd.DataFrame(team)
         df_t["Team"] = idx
         df_t["Selectie (%)"] = df_t["Name"].apply(
             lambda n: round(
-                sum(1 for t in all_teams if any(p["Name"] == n for p in t)) / len(all_teams) * 100, 1
+                sum(1 for t in all_teams if any(p["Name"] == n for p in t))
+                / len(all_teams) * 100, 1
             )
         )
         merged.append(df_t)
     merged_df = pd.concat(merged, ignore_index=True)
+
+    # --- Download button writes merged_df to a single-sheet Excel ---
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         merged_df.to_excel(writer, index=False, sheet_name="All Teams")
     buf.seek(0)
+
     st.download_button(
-        "📥 Download All Teams (Excel)", buf,
+        "📥 Download All Teams (Excel)",
+        buf,
         file_name="all_teams.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
     )
