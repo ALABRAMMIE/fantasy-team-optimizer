@@ -63,6 +63,38 @@ ftps_rand_pct = st.sidebar.slider(
     help="± this percent noise on FTPS for teams 2…N"
 )
 
+# === NEW: TIERS controls ===
+st.sidebar.markdown("### TIERS (Rank Buckets)")
+use_tiers = st.sidebar.checkbox(
+    "Use Tiers (shuffle FTPS within rank buckets)", value=False,
+    help="Lets players swap FTPS within their tier (e.g., ranks 1–5, 6–10, ...)."
+)
+tiers_apply_only_after_first = st.sidebar.checkbox(
+    "Apply tier shuffling for teams 2…N only", value=True
+)
+tiers_text_default = "1-5\n6-10\n11-15\n16-20\n21-25\n26-30"
+tiers_text = st.sidebar.text_area(
+    "Tier ranges (one per line, e.g., 1-5)", value=tiers_text_default,
+    help="Each line is a closed range of Rank positions included in a tier."
+)
+
+def parse_tier_ranges(text):
+    ranges = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", line)
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if lo <= hi:
+                ranges.append((lo, hi))
+    # sort by start rank
+    ranges.sort(key=lambda x: (x[0], x[1]))
+    return ranges
+
+tier_ranges = parse_tier_ranges(tiers_text) if use_tiers else []
+
 # --- Global usage cap ---
 global_usage_pct = st.sidebar.slider(
     "Global Max Usage % per player (across all teams)",
@@ -87,19 +119,104 @@ if not {"Name", "Value"}.issubset(df.columns):
     st.error("❌ File must include 'Name' and 'Value'.")
     st.stop()
 
+# Ensure FTPS exists
+if "FTPS" not in df.columns:
+    df["FTPS"] = 0.0
+
+# === NEW: establish Rank and Tier membership for rows ===
+def ensure_rank_column(dframe):
+    """
+    Prefer an explicit 'Rank' column if present (1=best).
+    Otherwise, derive Rank from FTPS descending (ties broken by Name).
+    """
+    if "Rank" in dframe.columns:
+        # Coerce to int and clean
+        out = dframe.copy()
+        out["Rank"] = pd.to_numeric(out["Rank"], errors="coerce")
+        # Drop NA ranks to bottom; then re-rank the NA by FTPS desc to ensure uniqueness
+        # But simpler: where Rank is NA, we will assign later.
+    else:
+        out = dframe.copy()
+        out["Rank"] = None
+
+    # fill missing ranks by FTPS (desc), Name (asc)
+    tmp = out.copy()
+    tmp["__order__"] = -pd.to_numeric(tmp["FTPS"], errors="coerce").fillna(0)
+    tmp["__name__"] = tmp["Name"].astype(str)
+    tmp = tmp.sort_values(["Rank", "__order__", "__name__"], ascending=[True, True, True])
+
+    # If any Rank missing or duplicated, create a clean 1..N ranking by FTPS desc
+    # Rule: if explicit Rank present and valid, keep it; otherwise assign sequentially after placing all valid ones.
+    n = len(tmp)
+    # Collect provided valid ranks
+    valid_mask = pd.to_numeric(tmp["Rank"], errors="coerce").notna()
+    provided = tmp.loc[valid_mask, "Rank"].astype(int)
+    # Start by assigning FTPS-desc order index for all
+    ftps_desc_order = tmp.sort_values(["__order__", "__name__"]).reset_index(drop=True)
+    ftps_desc_order["__seq__"] = range(1, n + 1)
+    order_map = dict(zip(ftps_desc_order["Name"], ftps_desc_order["__seq__"]))
+
+    # Build final rank vector
+    ranks = []
+    used = set(int(r) for r in provided if r > 0)
+    next_seq = 1
+    for _, row in tmp.iterrows():
+        if pd.notna(row["Rank"]) and int(row["Rank"]) > 0:
+            r = int(row["Rank"])
+            # if duplicate, fall back to FTPS-based
+            if r in used:
+                r = order_map[row["Name"]]
+            used.add(r)
+            ranks.append(r)
+        else:
+            # assign FTPS-based order
+            r = order_map[row["Name"]]
+            # avoid collision (extremely unlikely since order_map unique)
+            while r in used:
+                next_seq += 1
+                r = next_seq
+            used.add(r)
+            ranks.append(r)
+    tmp["Rank"] = ranks
+    tmp = tmp.drop(columns=["__order__", "__name__"], errors="ignore")
+    return tmp
+
+df = ensure_rank_column(df)
+
+# Compute Tier label per player (string like "1-5") if tiers are enabled
+def tier_label_from_rank(rnk, ranges):
+    for lo, hi in ranges:
+        if lo <= int(rnk) <= hi:
+            return f"{lo}-{hi}"
+    return None
+
+if use_tiers and tier_ranges:
+    df["Tier"] = df["Rank"].apply(lambda r: tier_label_from_rank(r, tier_ranges))
+else:
+    # keep existing 'Tier' if the upload already had one; otherwise None
+    if "Tier" not in df.columns:
+        df["Tier"] = None
+
+# Editable columns
 st.subheader("📋 Edit Player Data")
-cols = ["Name", "Value"] + [c for c in ("Position", "FTPS", "Bracket") if c in df.columns]
+cols = ["Name", "Value"] + [c for c in ("Position", "FTPS", "Bracket", "Rank", "Tier") if c in df.columns]
 edited = st.data_editor(df[cols], use_container_width=True)
+
+# Make sure we have FTPS and base copy
 if "FTPS" not in edited.columns:
-    edited["FTPS"] = 0
+    edited["FTPS"] = 0.0
 edited["base_FTPS"] = edited["FTPS"]
+
+# If user modified Rank/Tier inside the editor, keep consistent Tier if tiers enabled
+if use_tiers and tier_ranges:
+    edited["Tier"] = edited["Rank"].apply(lambda r: tier_label_from_rank(r, tier_ranges))
 
 players = edited.to_dict("records")
 include_players = st.sidebar.multiselect("Players to INCLUDE", edited["Name"])
 exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited["Name"])
 
 # collect brackets
-brackets = sorted(edited["Bracket"].dropna().unique())
+brackets = sorted(edited["Bracket"].dropna().unique()) if "Bracket" in edited.columns else []
 if use_bracket_constraints and not brackets:
     st.sidebar.warning("⚠️ Bracket Constraints on but no ‘Bracket’ column found.")
 
@@ -166,6 +283,45 @@ def add_min_diff(prob, x):
     for idx, prev in enumerate(prev_sets):
         prob += lpSum(x[n] for n in prev) <= team_size - diff_count, f"MinDiff_{idx}"
 
+# === NEW: build FTPS dictionary with Tier shuffling and noise ===
+def build_ftps_values_for_team(team_index: int):
+    """
+    Returns a dict {player_name: adjusted_ftps} for this run.
+    Logic:
+      1) Start from base_FTPS for all players.
+      2) If tiers are enabled:
+           - Decide whether to apply (depending on 'tiers_apply_only_after_first' and team_index).
+           - For each Tier bucket, randomly permute the FTPS values among its members.
+      3) Apply optional ±ftps_rand_pct noise (for teams 2..N), after tier shuffling.
+    """
+    # 1) base
+    ftps_vals = {p["Name"]: p.get("base_FTPS", 0.0) for p in players}
+
+    # 2) Tier shuffling
+    apply_tiers_now = use_tiers and tier_ranges and ((team_index > 0 and tiers_apply_only_after_first) or (team_index == 0 and not tiers_apply_only_after_first) or (team_index > 0 and not tiers_apply_only_after_first))
+    if use_tiers and tier_ranges and apply_tiers_now:
+        # group by Tier label computed earlier
+        # if a player's Tier is None (out of any defined range), they remain unchanged
+        tier_to_players = {}
+        for p in players:
+            t = p.get("Tier")
+            if t:
+                tier_to_players.setdefault(t, []).append(p["Name"])
+        # for each tier, permute their FTPS values among members
+        for t, names in tier_to_players.items():
+            if len(names) >= 2:
+                values = [ftps_vals[n] for n in names]
+                random.shuffle(values)
+                for n, v in zip(names, values):
+                    ftps_vals[n] = v
+
+    # 3) Random noise for teams 2..N (existing control)
+    if team_index > 0 and ftps_rand_pct > 0:
+        for n in ftps_vals:
+            ftps_vals[n] = ftps_vals[n] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))
+
+    return ftps_vals
+
 # --- Optimize Teams ---
 if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
@@ -205,13 +361,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
     # --- Maximize FTPS ---
     elif solver_mode == "Maximize FTPS":
         for idx in range(num_teams):
-            if idx == 0:
-                ftps_vals = {p["Name"]: p["base_FTPS"] for p in players}
-            else:
-                ftps_vals = {
-                    p["Name"]: p["base_FTPS"] * (1 + random.uniform(-ftps_rand_pct/100, ftps_rand_pct/100))
-                    for p in players
-                }
+            ftps_vals = build_ftps_values_for_team(idx)
 
             prob = LpProblem(f"opt_ftps_{idx}", LpMaximize)
             x    = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
@@ -235,7 +385,15 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 st.error("🚫 Infeasible under those constraints.")
                 st.stop()
 
-            team = [{**p, "Adjusted FTPS": ftps_vals[p["Name"]]} for p in players if x[p["Name"]].value() == 1]
+            team = []
+            for p in players:
+                if x[p["Name"]].value() == 1:
+                    row = {**p}
+                    row["Adjusted FTPS"] = ftps_vals[p["Name"]]
+                    # make sure Tier is visible
+                    row["Tier"] = p.get("Tier")
+                    team.append(row)
+
             all_teams.append(team)
             prev_sets.append({p["Name"] for p in team})
 
@@ -289,7 +447,15 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 st.error("🚫 Violation of min-difference constraint.")
                 st.stop()
 
-            team = [{**p, "Adjusted FTPS": p["base_FTPS"]} for p in slots if p]
+            # For 'Closest FTP Match', no FTPS optimization, but keep Tier visible
+            team = []
+            for p in slots:
+                if p:
+                    row = {**p}
+                    row["Adjusted FTPS"] = p.get("base_FTPS", p.get("FTPS", 0.0))
+                    row["Tier"] = p.get("Tier")
+                    team.append(row)
+
             all_teams.append(team)
             prev_sets.append(current)
             if len(all_teams) == num_teams:
@@ -305,7 +471,10 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     / len(all_teams) * 100, 1
                 )
             )
-            st.dataframe(df_t)
+            # Show a friendly column order if present
+            display_cols = [c for c in ["Name", "Position", "Value", "Rank", "Tier", "base_FTPS", "Adjusted FTPS", "Bracket"] if c in df_t.columns]
+            display_cols += [c for c in df_t.columns if c not in display_cols]
+            st.dataframe(df_t[display_cols])
 
     # --- Build merged DataFrame only for download ---
     merged = []
