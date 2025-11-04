@@ -104,7 +104,7 @@ global_usage_pct = st.sidebar.slider(
 st.sidebar.markdown("### Outcome Tiers (1v1)")
 use_outcome_tiers = st.sidebar.checkbox(
     "Use Outcome Tiers (Win/Draw/Loss)", value=False,
-    help="Map each player to outcome tiers (1: always win, 2: win/lose, 3: win/draw/lose) and adjust FTPS."
+    help="Map players to outcome tiers (1: always win, 2: win/lose, 3: win/draw/lose) and adjust FTPS."
 )
 
 allow_draws = st.sidebar.checkbox(
@@ -117,10 +117,31 @@ outcome_tier_source = st.sidebar.selectbox(
     index=1
 )
 
-# FTPS multipliers
+# FTPS multipliers (used in Multiplier mode)
 win_mult  = st.sidebar.number_input("FTPS factor for WIN", 0.0, 10.0, 1.00, 0.05)
 draw_mult = st.sidebar.number_input("FTPS factor for DRAW", 0.0, 10.0, 0.60, 0.05, disabled=not allow_draws)
 loss_mult = st.sidebar.number_input("FTPS factor for LOSS", 0.0, 10.0, 0.20, 0.05)
+
+# --- Outcome FTPS application mode + Fixed values ---
+outcome_value_mode = st.sidebar.radio(
+    "Outcome application mode",
+    ["Use Multipliers (× base_FTPS)", "Use Fixed FTPS values"],
+    index=0,
+    help="Choose whether outcomes multiply base_FTPS or replace it with fixed FTPS values."
+)
+
+fixed_win_ftps  = st.sidebar.number_input(
+    "Fixed FTPS for WIN", 0.0, 1000.0, 10.0, 0.5,
+    disabled=(outcome_value_mode != "Use Fixed FTPS values")
+)
+fixed_draw_ftps = st.sidebar.number_input(
+    "Fixed FTPS for DRAW", 0.0, 1000.0, 6.0, 0.5,
+    disabled=(outcome_value_mode != "Use Fixed FTPS values" or not allow_draws)
+)
+fixed_loss_ftps = st.sidebar.number_input(
+    "Fixed FTPS for LOSS", 0.0, 1000.0, 2.0, 0.5,
+    disabled=(outcome_value_mode != "Use Fixed FTPS values")
+)
 
 # Outcome probabilities
 st.sidebar.caption("**Tier 1**: always WIN.")
@@ -346,7 +367,12 @@ def outcome_factor(symbol: str):
     if symbol == 'D': return draw_mult if allow_draws else 0.0
     return loss_mult
 
-# --- Build FTPS per team (Outcome tiers -> Rank tiers -> Noise) ---
+def outcome_fixed_value(symbol: str):
+    if symbol == 'W': return fixed_win_ftps
+    if symbol == 'D': return fixed_draw_ftps if allow_draws else 0.0
+    return fixed_loss_ftps
+
+# --- Build FTPS per team (Outcome -> Rank tiers -> Noise) ---
 def build_ftps_values_for_team(team_index: int):
     ftps_vals = {p["Name"]: p.get("base_FTPS", p.get("FTPS", 0.0)) for p in players}
 
@@ -361,7 +387,13 @@ def build_ftps_values_for_team(team_index: int):
             tier = int(p.get("OutcomeTier", 3))
             outcome = sample_outcome_for_tier(tier)
             sampled_outcomes[p["Name"]] = outcome
-            ftps_vals[p["Name"]] = ftps_vals[p["Name"]] * outcome_factor(outcome)
+
+            if outcome_value_mode == "Use Fixed FTPS values":
+                # OVERWRITE: ignore uploaded base_FTPS; use fixed outcome FTPS
+                ftps_vals[p["Name"]] = outcome_fixed_value(outcome)
+            else:
+                # MULTIPLY: apply factor to base
+                ftps_vals[p["Name"]] = ftps_vals[p["Name"]] * outcome_factor(outcome)
 
     # B) Rank-tier shuffling (if enabled)
     apply_rank_tiers_now = use_tiers and tier_ranges and (
@@ -369,9 +401,6 @@ def build_ftps_values_for_team(team_index: int):
         ((team_index == 0) and not tiers_apply_only_after_first) or
         ((team_index > 0) and not tiers_apply_only_after_first)
     )
-    if use_outcome_tiers:
-        # If you prefer outcome tiers to be exclusive, set apply_rank_tiers_now = False
-        pass
     if apply_rank_tiers_now:
         tier_to_players = {}
         for p in players:
@@ -470,7 +499,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 min_needed = math.ceil(num_teams * min_usage_rank1_pct / 100)
                 used_so_far = sum(1 for prev in prev_sets if rank1_name in prev)
                 teams_left = num_teams - idx
-                # If we must include Rank 1 now to still hit the minimum, force it
                 if used_so_far + teams_left <= min_needed:
                     prob += x[rank1_name] == 1, f"MinUseRank1_team{idx+1}"
 
@@ -484,12 +512,14 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 if x[p["Name"]].value() == 1:
                     row = {**p}
                     row["Adjusted FTPS"] = ftps_vals[p["Name"]]
-                    # Display outcome info when used
                     if use_outcome_tiers:
                         sym = sampled_outcomes.get(p["Name"], None)
                         row["OutcomeTier"] = p.get("OutcomeTier", 3)
                         row["Outcome"] = sym
-                        row["Outcome Factor"] = outcome_factor(sym) if sym else None
+                        if outcome_value_mode == "Use Fixed FTPS values":
+                            row["Outcome Value (FTPS)"] = outcome_fixed_value(sym) if sym else None
+                        else:
+                            row["Outcome Factor"] = outcome_factor(sym) if sym else None
                     row["Tier"] = p.get("Tier")
                     team.append(row)
 
@@ -550,7 +580,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
             for p in slots:
                 if p:
                     row = {**p}
-                    # No FTPS optimization here; still show derived fields for transparency
                     row["Adjusted FTPS"] = p.get("base_FTPS", p.get("FTPS", 0.0))
                     if use_outcome_tiers:
                         row["OutcomeTier"] = p.get("OutcomeTier", 3)
@@ -574,7 +603,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
             )
             display_cols = [c for c in [
                 "Name","Position","Value","Rank","Tier",
-                "OutcomeTier","Outcome","Outcome Factor",
+                "OutcomeTier","Outcome","Outcome Factor","Outcome Value (FTPS)",
                 "base_FTPS","Adjusted FTPS","Bracket","Selectie (%)"
             ] if c in df_t.columns]
             display_cols += [c for c in df_t.columns if c not in display_cols]
