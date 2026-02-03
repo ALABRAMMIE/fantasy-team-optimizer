@@ -110,7 +110,11 @@ if uploaded_file:
     must_exclude = st.sidebar.multiselect("Mag niet in team (Exclude):", [n for n in all_names if n not in must_include])
 
     # Rank 1 bepalen (voor de constraint)
-    rank1_player = max(players_data, key=lambda x: x.get("FTPS", 0))
+    # Beveiliging voor als FTPS kolom leeg is
+    if players_data:
+        rank1_player = max(players_data, key=lambda x: x.get("FTPS", 0))
+    else:
+        rank1_player = None
 
     # ==========================================
     # 3. SIMULATIE LOGICA
@@ -209,7 +213,7 @@ if uploaded_file:
             for n in must_exclude: prob += x[str(n)] == 0
             
             # Rank 1 Constraint (Optional)
-            if include_rank1 and i == 0:
+            if include_rank1 and i == 0 and rank1_player:
                 if rank1_player["Name"] not in must_exclude:
                     prob += x[str(rank1_player["Name"])] == 1
 
