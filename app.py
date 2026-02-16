@@ -6,12 +6,12 @@ from io import BytesIO
 from collections import defaultdict
 
 # --- Page Config ---
-st.set_page_config(page_title="Fantasy Team Optimizer v3.3", layout="wide")
-st.title("Fantasy Team Optimizer v3.3")
+st.set_page_config(page_title="Fantasy Team Optimizer v3.4 (Smart Budget)", layout="wide")
+st.title("Fantasy Team Optimizer v3.4 (Smart Budget)")
 st.markdown("""
-**Update v3.3:**
-* **Bugfix:** Syntaxfout bij Rank 1 logica hersteld.
-* **Features:** Multi-team 'Closest Match' met slimme wissels & Auto-Stop functionaliteit.
+**Update v3.4:**
+* **Smart Budget Check:** Bij 'Closest FTP Match' wordt nu tijdens het zoeken al gecontroleerd of een speler in het budget past.
+Als een duurdere speler het budget zou overschrijden, zoekt hij automatisch naar de beste goedkopere optie ("lower closest match").
 """)
 
 # --- Sidebar: Sport & Template ---
@@ -662,33 +662,30 @@ if st.sidebar.button("🚀 Optimize Teams"):
             prev_sets.append({p["Name"] for p in team})
             progress_bar.progress((idx + 1) / num_teams)
 
-    else:  # Closest FTP Match with SMART REPLACEMENT Loop
+    else:  # Closest FTP Match with SMART BUDGET + SMART REPLACEMENT
         cap = math.floor(num_teams * global_usage_pct / 100)
         
+        # Determine minimum cost to fill a slot (approximate)
+        # This prevents picking expensive players early that leave no budget for later slots
+        min_possible_price = min(p["Value"] for p in players) if players else 0.0
+
         for idx in range(num_teams):
             status_msg.text(f"Optimizing team {idx+1} (Smart Match)...")
             
             # --- SMART SWAP LOGIC ---
-            # If we have a previous team, pick 'diff_count' players to BAN for this iteration
-            # This forces the greedy algorithm to find the "next best" replacements
             current_excludes = list(exclude_players)
             if idx > 0 and diff_count > 0 and prev_sets:
                 last_team_names = list(prev_sets[-1])
-                # Only ban players who are NOT in the include_list (forced keeps)
                 candidates_to_drop = [n for n in last_team_names if n not in include_players]
-                
-                # Randomly select 'diff_count' players to drop to force a new variation
                 if len(candidates_to_drop) >= diff_count:
                     drop_list = random.sample(candidates_to_drop, diff_count)
                     current_excludes.extend(drop_list)
             
-            # Now run the greedy matcher with these constraints
             slots, used_brackets, used_names = [None] * team_size, set(), set()
             
             # 1. Fill Includes
             for n in include_players:
                 p0 = next(p for p in players if p["Name"] == n)
-                # Find best slot for this included player
                 diffs = [
                     (i, abs(p0["Value"] - target_values[i]))
                     for i in range(team_size)
@@ -701,14 +698,24 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     if use_bracket_constraints and p0.get("Bracket"):
                         used_brackets.add(p0["Bracket"])
             
-            # 2. Fill Remaining Slots
+            # 2. Fill Remaining Slots (with Budget Awareness)
+            current_cost = sum(s["Value"] for s in slots if s)
+            
             for i in range(team_size):
                 if slots[i] is not None:
                     continue
                 tgt = target_values[i]
                 cands = []
+                
+                # --- BUDGET CONSTRAINT CHECK ---
+                # How many slots left AFTER this one?
+                # slots filled so far (including this one if we pick it) = N/A
+                # We need to ensure: current_cost + this_pick + (slots_remaining_after * min_price) <= budget
+                slots_remaining_after_this = sum(1 for s in slots if s is None) - 1
+                max_affordable_for_this_slot = budget - current_cost - (slots_remaining_after_this * min_possible_price)
+                
                 for p in players:
-                    # Check exclusions (Global + Temporary Smart Swap)
+                    # Basic Exclusions
                     if p["Name"] in used_names or p["Name"] in current_excludes:
                         continue
                     if use_bracket_constraints and p.get("Bracket") in used_brackets:
@@ -716,24 +723,29 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     used = sum(1 for prev in prev_sets if p["Name"] in prev)
                     if p["Name"] not in include_players and used >= cap:
                         continue
+                    
+                    # --- CRITICAL: FILTER BY BUDGET ---
+                    if p["Value"] > max_affordable_for_this_slot:
+                        continue
+                        
                     cands.append(p)
                 
                 if not cands:
                     if stop_early:
-                        st.warning(f"⚠️ Stopped after {idx} teams. Not enough players available.")
+                        st.warning(f"⚠️ Stopped after {idx} teams. No affordable players left for slot {i}.")
                         break
                     else:
-                        st.error("🚫 Infeasible under those constraints.")
+                        st.error("🚫 Infeasible: Budget tight or constraints too strict.")
                         st.stop()
                 
-                # Pick best available (Greedy)
                 pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
                 slots[i] = pick
                 used_names.add(pick["Name"])
                 if use_bracket_constraints and pick.get("Bracket"):
                     used_brackets.add(pick["Bracket"])
+                
+                current_cost += pick["Value"]
             
-            # Check for break inside loop
             if any(s is None for s in slots):
                 break
 
@@ -816,6 +828,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
         st.download_button(
             "📥 Download All Teams (Excel)",
             buf,
-            file_name="all_teams_v3_3.xlsx",
+            file_name="all_teams_v3_4.xlsx",
             mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
         )
