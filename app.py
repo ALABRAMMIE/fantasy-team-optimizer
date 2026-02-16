@@ -6,12 +6,12 @@ from io import BytesIO
 from collections import defaultdict
 
 # --- Page Config ---
-st.set_page_config(page_title="Fantasy Team Optimizer v3.4 (Smart Budget)", layout="wide")
-st.title("Fantasy Team Optimizer v3.4 (Smart Budget)")
+st.set_page_config(page_title="Fantasy Team Optimizer v3.6 (Fix Includes)", layout="wide")
+st.title("Fantasy Team Optimizer v3.6")
 st.markdown("""
-**Update v3.4:**
-* **Smart Budget Check:** Bij 'Closest FTP Match' wordt nu tijdens het zoeken al gecontroleerd of een speler in het budget past.
-Als een duurdere speler het budget zou overschrijden, zoekt hij automatisch naar de beste goedkopere optie ("lower closest match").
+**Update v3.6:**
+* **Fix:** Include & Exclude opties verplaatst naar het hoofdscherm (onder de tabel) voor betere zichtbaarheid.
+* **Logic:** Smart Match houdt rekening met jouw gedwongen keuzes.
 """)
 
 # --- Sidebar: Sport & Template ---
@@ -46,6 +46,8 @@ if template_file:
         st.sidebar.warning("⚠️ Unable to read template.")
 
 # --- Core constraints ---
+st.sidebar.markdown("---")
+st.sidebar.markdown("### ⚙️ Constraints")
 use_bracket_constraints = st.sidebar.checkbox("Use Bracket Constraints")
 budget            = st.sidebar.number_input("Max Budget", value=140.0)
 default_team_size = 13
@@ -73,7 +75,8 @@ ftps_rand_pct = st.sidebar.slider(
 )
 
 # === Rank TIERS controls ===
-st.sidebar.markdown("### Rank TIERS (Rank Buckets)")
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Rank TIERS")
 use_tiers = st.sidebar.checkbox(
     "Use Rank Tiers (shuffle FTPS within rank buckets)", value=False
 )
@@ -104,6 +107,7 @@ global_usage_pct = st.sidebar.slider(
 )
 
 # === Outcome Tiers (1v1 outcomes) ===
+st.sidebar.markdown("---")
 st.sidebar.markdown("### Outcome Tiers (1v1)")
 use_outcome_tiers = st.sidebar.checkbox("Use Outcome Tiers (Win/Draw/Loss)", value=False)
 allow_draws = st.sidebar.checkbox(
@@ -171,6 +175,7 @@ min_usage_rank1_pct = st.sidebar.slider(
 )
 
 # --- Upload & Edit Players ---
+st.sidebar.markdown("---")
 st.sidebar.markdown("### Upload Players File")
 uploaded_file = st.sidebar.file_uploader("Upload your Excel file (players)", type=["xlsx"])
 if not uploaded_file:
@@ -248,6 +253,18 @@ cols = ["Name", "Value"] + [
 ]
 edited = st.data_editor(df[cols], use_container_width=True)
 
+# --- VERPLAATSTE SELECTIONS (Nu in Main Page) ---
+players = edited.to_dict("records")
+all_player_names = sorted(list(set(edited["Name"].astype(str))))
+
+st.subheader("🔒 Forceer Spelers (Pre-selectie)")
+c1, c2 = st.columns(2)
+with c1:
+    include_players = st.multiselect("Players to INCLUDE (Moet mee)", all_player_names)
+with c2:
+    exclude_players = st.multiselect("Players to EXCLUDE (Verbannen)", all_player_names)
+# -----------------------------------------------
+
 if "FTPS" not in edited.columns:
     edited["FTPS"] = 0.0
 edited["base_FTPS"] = edited["FTPS"]
@@ -280,10 +297,6 @@ if use_outcome_tiers:
 else:
     if "OutcomeTier" not in edited.columns:
         edited["OutcomeTier"] = None
-
-players = edited.to_dict("records")
-include_players = st.sidebar.multiselect("Players to INCLUDE", edited["Name"])
-exclude_players = st.sidebar.multiselect("Players to EXCLUDE", edited["Name"])
 
 # --- Brackets (existing) ---
 brackets = sorted(edited["Bracket"].dropna().unique()) if "Bracket" in edited.columns else []
@@ -534,7 +547,7 @@ def build_ftps_values_for_team(team_index: int):
     return ftps_vals, sampled_outcomes
 
 # --- Optimize Teams ---
-if st.sidebar.button("🚀 Optimize Teams"):
+if st.button("🚀 Optimize Teams"):
     all_teams = []
     prev_sets = []
     
@@ -666,7 +679,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
         cap = math.floor(num_teams * global_usage_pct / 100)
         
         # Determine minimum cost to fill a slot (approximate)
-        # This prevents picking expensive players early that leave no budget for later slots
         min_possible_price = min(p["Value"] for p in players) if players else 0.0
 
         for idx in range(num_teams):
@@ -707,10 +719,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                 tgt = target_values[i]
                 cands = []
                 
-                # --- BUDGET CONSTRAINT CHECK ---
                 # How many slots left AFTER this one?
-                # slots filled so far (including this one if we pick it) = N/A
-                # We need to ensure: current_cost + this_pick + (slots_remaining_after * min_price) <= budget
                 slots_remaining_after_this = sum(1 for s in slots if s is None) - 1
                 max_affordable_for_this_slot = budget - current_cost - (slots_remaining_after_this * min_possible_price)
                 
@@ -724,7 +733,7 @@ if st.sidebar.button("🚀 Optimize Teams"):
                     if p["Name"] not in include_players and used >= cap:
                         continue
                     
-                    # --- CRITICAL: FILTER BY BUDGET ---
+                    # --- BUDGET FILTER ---
                     if p["Value"] > max_affordable_for_this_slot:
                         continue
                         
@@ -828,6 +837,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
         st.download_button(
             "📥 Download All Teams (Excel)",
             buf,
-            file_name="all_teams_v3_4.xlsx",
+            file_name="all_teams_v3_6.xlsx",
             mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
         )
