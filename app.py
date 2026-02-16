@@ -6,12 +6,12 @@ from io import BytesIO
 from collections import defaultdict
 
 # --- Page Config ---
-st.set_page_config(page_title="Fantasy Team Optimizer v2.1 (Auto-Max)", layout="wide")
-st.title("Fantasy Team Optimizer v2.1 (Auto-Max)")
+st.set_page_config(page_title="Fantasy Team Optimizer v3.2 (Multi-Team Match)", layout="wide")
+st.title("Fantasy Team Optimizer v3.2 (Multi-Team Match)")
 st.markdown("""
-**Update v2.1:**
-* Toegevoegd: **'Stop als op (Maximaliseer)'**. De optimizer stopt automatisch als er geen unieke teams meer gevonden kunnen worden.
-* Verbeterd: Foutafhandeling bij onmogelijke constraints.
+**Update v3.2:**
+* **Multi-Team Template Match:** Je kunt nu onbeperkt teams genereren met de 'Closest FTP Match' methode.
+* **Smart Swaps:** Het systeem forceert voor elk volgend team wissels (op basis van je 'Min Verschil' instelling) en zoekt daarvoor de best mogelijke vervangers.
 """)
 
 # --- Sidebar: Sport & Template ---
@@ -59,11 +59,12 @@ solver_mode = st.sidebar.radio(
 )
 num_teams  = st.sidebar.number_input("Number of Teams (Target)", min_value=1, max_value=100, value=1)
 diff_count = st.sidebar.number_input(
-    "Min Verschil tussen Teams (aantal spelers)", min_value=0, max_value=team_size, value=1
+    "Min Verschil tussen Teams (aantal spelers)", min_value=0, max_value=team_size, value=1,
+    help="Voor 'Closest Match': Dit is het aantal spelers dat per nieuw team vervangen MOET worden door de 'next best' optie."
 )
 
-# --- NIEUW: Auto-Stop ---
-stop_early = st.sidebar.checkbox("⏹️ Stop als op (Maximaliseer)", value=True, help="Stop automatisch als er geen unieke teams meer gevonden kunnen worden, in plaats van een error te geven.")
+# --- Auto-Stop ---
+stop_early = st.sidebar.checkbox("⏹️ Stop als op (Maximaliseer)", value=True, help="Stop automatisch als er geen unieke teams meer gevonden kunnen worden.")
 
 # --- FTPS randomness ---
 ftps_rand_pct = st.sidebar.slider(
@@ -408,9 +409,6 @@ def independent_sample_outcome(tier: int):
     return 'L'
 
 def sample_outcomes_by_bracket():
-    """
-    Returns dict: name -> outcome ('W','D','L'), enforcing bracket coupling.
-    """
     groups = defaultdict(list)
     for p in players:
         br = p.get("Bracket")
@@ -419,7 +417,6 @@ def sample_outcomes_by_bracket():
 
     outcomes = {}
 
-    # bracketed players
     for br, group in groups.items():
         if len(group) == 1:
             p = group[0]
@@ -476,7 +473,6 @@ def sample_outcomes_by_bracket():
         for p in group:
             outcomes[p["Name"]] = 'W' if p["Name"] == winner["Name"] else 'L'
 
-    # non-bracketed players
     bracketed_names = set(outcomes.keys())
     for p in players:
         if p["Name"] in bracketed_names:
@@ -485,7 +481,6 @@ def sample_outcomes_by_bracket():
 
     return outcomes
 
-# Build FTPS per team (Outcome -> Rank tiers -> Noise)
 def build_ftps_values_for_team(team_index: int):
     ftps_vals = {
         p["Name"]: p.get("base_FTPS", p.get("FTPS", 0.0))
@@ -584,7 +579,6 @@ if st.sidebar.button("🚀 Optimize Teams"):
             for n in exclude_players:
                 prob += x[n] == 0
 
-            # Solve (quietly)
             prob.solve()
             
             if prob.status != 1:
@@ -628,171 +622,4 @@ if st.sidebar.button("🚀 Optimize Teams"):
             rank1_name = get_rank1_name(ftps_vals)
             if idx == 0 and always_include_rank1_team1 and rank1_name in x:
                 prob += x[rank1_name] == 1, "ForceRank1Team1"
-            if min_usage_rank1_pct > 0 and rank1_name in x:
-                min_needed = math.ceil(num_teams * min_usage_rank1_pct / 100)
-                used_so_far = sum(1 for prev in prev_sets if rank1_name in prev)
-                teams_left = num_teams - idx
-                if used_so_far + teams_left <= min_needed:
-                    prob += x[rank1_name] == 1, f"MinUseRank1_team{idx+1}"
-
-            prob.solve()
-            if prob.status != 1:
-                if stop_early:
-                    st.warning(f"⚠️ Stopped after {idx} teams. Unable to find more unique lineups.")
-                    break
-                else:
-                    st.error(f"🚫 Infeasible at team {idx+1}. Check constraints.")
-                    break
-
-            team = []
-            for p in players:
-                if x[p["Name"]].value() == 1:
-                    row = {**p}
-                    row["Adjusted FTPS"] = ftps_vals[p["Name"]]
-                    if use_outcome_tiers:
-                        sym = sampled_outcomes.get(p["Name"], None)
-                        row["OutcomeTier"] = p.get("OutcomeTier", 3)
-                        row["Outcome"] = sym
-                        if outcome_value_mode == "Use Fixed FTPS values":
-                            row["Outcome Value (FTPS)"] = (
-                                outcome_fixed_value(sym) if sym else None
-                            )
-                        else:
-                            row["Outcome Factor"] = (
-                                outcome_factor(sym) if sym else None
-                            )
-                    row["Tier"] = p.get("Tier")
-                    team.append(row)
-            all_teams.append(team)
-            prev_sets.append({p["Name"] for p in team})
-            progress_bar.progress((idx + 1) / num_teams)
-
-    else:  # Closest FTP Match
-        cap = math.floor(num_teams * global_usage_pct / 100)
-        for idx in range(num_teams):
-            status_msg.text(f"Optimizing team {idx+1}...")
-            slots, used_brackets, used_names = [None] * team_size, set(), set()
-            for n in include_players:
-                p0 = next(p for p in players if p["Name"] == n)
-                diffs = [
-                    (i, abs(p0["Value"] - target_values[i]))
-                    for i in range(team_size)
-                    if slots[i] is None
-                ]
-                best_i = min(diffs, key=lambda x: x[1])[0]
-                slots[best_i] = p0
-                used_names.add(n)
-                if use_bracket_constraints and p0.get("Bracket"):
-                    used_brackets.add(p0["Bracket"])
-            for i in range(team_size):
-                if slots[i] is not None:
-                    continue
-                tgt = target_values[i]
-                cands = []
-                for p in players:
-                    if p["Name"] in used_names or p["Name"] in exclude_players:
-                        continue
-                    if use_bracket_constraints and p.get("Bracket") in used_brackets:
-                        continue
-                    used = sum(1 for prev in prev_sets if p["Name"] in prev)
-                    if p["Name"] not in include_players and used >= cap:
-                        continue
-                    cands.append(p)
-                if not cands:
-                    if stop_early:
-                        st.warning("⚠️ Stopped: Not enough players available.")
-                        break
-                    else:
-                        st.error("🚫 Infeasible under those constraints.")
-                        st.stop()
-                pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
-                slots[i] = pick
-                used_names.add(pick["Name"])
-                if use_bracket_constraints and pick.get("Bracket"):
-                    used_brackets.add(pick["Bracket"])
-            
-            # Check if broken due to break
-            if any(s is None for s in slots):
-                break
-
-            cost = sum(p["Value"] for p in slots if p)
-            if cost > budget:
-                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")
-                st.stop()
-            current = {p["Name"] for p in slots if p}
-            if prev_sets and len(current & prev_sets[-1]) > team_size - diff_count:
-                st.error("🚫 Violation of min-difference constraint.")
-                st.stop()
-            team = []
-            for p in slots:
-                if p:
-                    row = {**p}
-                    row["Adjusted FTPS"] = p.get("base_FTPS", p.get("FTPS", 0.0))
-                    if use_outcome_tiers:
-                        row["OutcomeTier"] = p.get("OutcomeTier", 3)
-                    row["Tier"] = p.get("Tier")
-                    team.append(row)
-            all_teams.append(team)
-            prev_sets.append(current)
-            progress_bar.progress((idx + 1) / num_teams)
-            if len(all_teams) == num_teams:
-                break
-    
-    status_msg.empty()
-    progress_bar.empty()
-
-    if not all_teams:
-        st.error("⚠️ No teams generated. Please check your constraints.")
-    else:
-        st.success(f"✅ Generated {len(all_teams)} teams!")
-
-        # --- Display
-        for i, team in enumerate(all_teams, start=1):
-            with st.expander(f"Team {i}", expanded=(i == 1)):
-                df_t = pd.DataFrame(team)
-                df_t["Selectie (%)"] = df_t["Name"].apply(
-                    lambda n: round(
-                        sum(
-                            1 for t in all_teams
-                            if any(p["Name"] == n for p in t)
-                        ) / len(all_teams) * 100,
-                        1,
-                    )
-                )
-                display_cols = [
-                    c for c in [
-                        "Name", "Position", "Value", "Rank", "Tier",
-                        "OutcomeTier", "Outcome", "Outcome Factor", "Outcome Value (FTPS)",
-                        "base_FTPS", "Adjusted FTPS", "Bracket", "Selectie (%)"
-                    ]
-                    if c in df_t.columns
-                ]
-                display_cols += [c for c in df_t.columns if c not in display_cols]
-                st.dataframe(df_t[display_cols], use_container_width=True)
-
-        # --- Download
-        merged = []
-        for idx, team in enumerate(all_teams, start=1):
-            df_t = pd.DataFrame(team)
-            df_t["Team"] = idx
-            df_t["Selectie (%)"] = df_t["Name"].apply(
-                lambda n: round(
-                    sum(
-                        1 for t in all_teams
-                        if any(p["Name"] == n for p in t)
-                    ) / len(all_teams) * 100,
-                    1,
-                )
-            )
-            merged.append(df_t)
-        merged_df = pd.concat(merged, ignore_index=True)
-        buf = BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            merged_df.to_excel(writer, index=False, sheet_name="All Teams")
-        buf.seek(0)
-        st.download_button(
-            "📥 Download All Teams (Excel)",
-            buf,
-            file_name="all_teams_v2_1.xlsx",
-            mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
-        )
+            if min_usage_
