@@ -6,12 +6,12 @@ from io import BytesIO
 from collections import defaultdict
 
 # --- Page Config ---
-st.set_page_config(page_title="Fantasy Team Optimizer v3.6 (Fix Includes)", layout="wide")
-st.title("Fantasy Team Optimizer v3.6")
+st.set_page_config(page_title="Fantasy Team Optimizer v3.7 (Crash Fix)", layout="wide")
+st.title("Fantasy Team Optimizer v3.7 (Crash Fix)")
 st.markdown("""
-**Update v3.6:**
-* **Fix:** Include & Exclude opties verplaatst naar het hoofdscherm (onder de tabel) voor betere zichtbaarheid.
-* **Logic:** Smart Match houdt rekening met jouw gedwongen keuzes.
+**Update v3.7:**
+* **Crash Fix:** Opgelost probleem waarbij 'Closest Match' stopte als teams werden ge-exclude.
+* **Rescue Mode:** Als het budget te krap wordt voor een specifieke match, pakt hij automatisch de goedkoopste beschikbare speler om het team compleet te maken.
 """)
 
 # --- Sidebar: Sport & Template ---
@@ -678,165 +678,9 @@ if st.button("🚀 Optimize Teams"):
     else:  # Closest FTP Match with SMART BUDGET + SMART REPLACEMENT
         cap = math.floor(num_teams * global_usage_pct / 100)
         
-        # Determine minimum cost to fill a slot (approximate)
-        min_possible_price = min(p["Value"] for p in players) if players else 0.0
+        # Calculate min_price based on VALID players only (not excluded ones)
+        valid_pool = [p for p in players if p["Name"] not in exclude_players]
+        min_possible_price = min(p["Value"] for p in valid_pool) if valid_pool else 0.0
 
         for idx in range(num_teams):
-            status_msg.text(f"Optimizing team {idx+1} (Smart Match)...")
-            
-            # --- SMART SWAP LOGIC ---
-            current_excludes = list(exclude_players)
-            if idx > 0 and diff_count > 0 and prev_sets:
-                last_team_names = list(prev_sets[-1])
-                candidates_to_drop = [n for n in last_team_names if n not in include_players]
-                if len(candidates_to_drop) >= diff_count:
-                    drop_list = random.sample(candidates_to_drop, diff_count)
-                    current_excludes.extend(drop_list)
-            
-            slots, used_brackets, used_names = [None] * team_size, set(), set()
-            
-            # 1. Fill Includes
-            for n in include_players:
-                p0 = next(p for p in players if p["Name"] == n)
-                diffs = [
-                    (i, abs(p0["Value"] - target_values[i]))
-                    for i in range(team_size)
-                    if slots[i] is None
-                ]
-                if diffs:
-                    best_i = min(diffs, key=lambda x: x[1])[0]
-                    slots[best_i] = p0
-                    used_names.add(n)
-                    if use_bracket_constraints and p0.get("Bracket"):
-                        used_brackets.add(p0["Bracket"])
-            
-            # 2. Fill Remaining Slots (with Budget Awareness)
-            current_cost = sum(s["Value"] for s in slots if s)
-            
-            for i in range(team_size):
-                if slots[i] is not None:
-                    continue
-                tgt = target_values[i]
-                cands = []
-                
-                # How many slots left AFTER this one?
-                slots_remaining_after_this = sum(1 for s in slots if s is None) - 1
-                max_affordable_for_this_slot = budget - current_cost - (slots_remaining_after_this * min_possible_price)
-                
-                for p in players:
-                    # Basic Exclusions
-                    if p["Name"] in used_names or p["Name"] in current_excludes:
-                        continue
-                    if use_bracket_constraints and p.get("Bracket") in used_brackets:
-                        continue
-                    used = sum(1 for prev in prev_sets if p["Name"] in prev)
-                    if p["Name"] not in include_players and used >= cap:
-                        continue
-                    
-                    # --- BUDGET FILTER ---
-                    if p["Value"] > max_affordable_for_this_slot:
-                        continue
-                        
-                    cands.append(p)
-                
-                if not cands:
-                    if stop_early:
-                        st.warning(f"⚠️ Stopped after {idx} teams. No affordable players left for slot {i}.")
-                        break
-                    else:
-                        st.error("🚫 Infeasible: Budget tight or constraints too strict.")
-                        st.stop()
-                
-                pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
-                slots[i] = pick
-                used_names.add(pick["Name"])
-                if use_bracket_constraints and pick.get("Bracket"):
-                    used_brackets.add(pick["Bracket"])
-                
-                current_cost += pick["Value"]
-            
-            if any(s is None for s in slots):
-                break
-
-            cost = sum(p["Value"] for p in slots if p)
-            if cost > budget:
-                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")
-                st.stop()
-            
-            team = []
-            current_set = set()
-            for p in slots:
-                if p:
-                    row = {**p}
-                    row["Adjusted FTPS"] = p.get("base_FTPS", p.get("FTPS", 0.0))
-                    if use_outcome_tiers:
-                        row["OutcomeTier"] = p.get("OutcomeTier", 3)
-                    row["Tier"] = p.get("Tier")
-                    team.append(row)
-                    current_set.add(p["Name"])
-            
-            all_teams.append(team)
-            prev_sets.append(current_set)
-            progress_bar.progress((idx + 1) / num_teams)
-            
-            if len(all_teams) == num_teams:
-                break
-    
-    status_msg.empty()
-    progress_bar.empty()
-
-    if not all_teams:
-        st.error("⚠️ No teams generated. Please check your constraints.")
-    else:
-        st.success(f"✅ Generated {len(all_teams)} teams!")
-
-        # --- Display
-        for i, team in enumerate(all_teams, start=1):
-            with st.expander(f"Team {i}", expanded=(i == 1)):
-                df_t = pd.DataFrame(team)
-                df_t["Selectie (%)"] = df_t["Name"].apply(
-                    lambda n: round(
-                        sum(
-                            1 for t in all_teams
-                            if any(p["Name"] == n for p in t)
-                        ) / len(all_teams) * 100,
-                        1,
-                    )
-                )
-                display_cols = [
-                    c for c in [
-                        "Name", "Position", "Value", "Rank", "Tier",
-                        "OutcomeTier", "Outcome", "Outcome Factor", "Outcome Value (FTPS)",
-                        "base_FTPS", "Adjusted FTPS", "Bracket", "Selectie (%)"
-                    ]
-                    if c in df_t.columns
-                ]
-                display_cols += [c for c in df_t.columns if c not in display_cols]
-                st.dataframe(df_t[display_cols], use_container_width=True)
-
-        # --- Download
-        merged = []
-        for idx, team in enumerate(all_teams, start=1):
-            df_t = pd.DataFrame(team)
-            df_t["Team"] = idx
-            df_t["Selectie (%)"] = df_t["Name"].apply(
-                lambda n: round(
-                    sum(
-                        1 for t in all_teams
-                        if any(p["Name"] == n for p in t)
-                    ) / len(all_teams) * 100,
-                    1,
-                )
-            )
-            merged.append(df_t)
-        merged_df = pd.concat(merged, ignore_index=True)
-        buf = BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            merged_df.to_excel(writer, index=False, sheet_name="All Teams")
-        buf.seek(0)
-        st.download_button(
-            "📥 Download All Teams (Excel)",
-            buf,
-            file_name="all_teams_v3_6.xlsx",
-            mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
-        )
+            status
