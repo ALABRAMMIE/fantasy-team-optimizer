@@ -6,12 +6,13 @@ from io import BytesIO
 from collections import defaultdict
 
 # --- Page Config ---
-st.set_page_config(page_title="Fantasy Team Optimizer v3.9 (Budget Fix)", layout="wide")
-st.title("Fantasy Team Optimizer v3.9 (Budget Fix)")
+st.set_page_config(page_title="Fantasy Team Optimizer v4.0 (Stable)", layout="wide")
+st.title("Fantasy Team Optimizer v4.0")
 st.markdown("""
-**Update v3.9:**
-* **Budget Solver Fix:** Bij 'Maximize Budget Usage' dwingt hij niet meer af dat het volgende team goedkoper moet zijn.
-* **Resultaat:** Je kunt nu meerdere teams genereren die allemaal exact hetzelfde maximale budget gebruiken (bv. 10 teams van precies 15M).
+**Update v4.0:**
+* **Stabiliteit:** Startknop terug in de zijbalk voor betere werking.
+* **Feedback:** Je ziet nu direct een statusmelding als de berekening start.
+* **Maximize Budget:** Forceert nu unieke teams, zelfs als het budget exact hetzelfde blijft.
 """)
 
 # --- Sidebar: Sport & Template ---
@@ -62,7 +63,7 @@ solver_mode = st.sidebar.radio(
 num_teams  = st.sidebar.number_input("Number of Teams (Target)", min_value=1, max_value=100, value=1)
 diff_count = st.sidebar.number_input(
     "Min Verschil tussen Teams (aantal spelers)", min_value=0, max_value=team_size, value=1,
-    help="Voor 'Closest Match': Dit is het aantal spelers dat per nieuw team vervangen MOET worden door de 'next best' optie."
+    help="Hoeveel spelers moeten er MINIMAAL anders zijn dan het vorige team?"
 )
 
 # --- Auto-Stop ---
@@ -547,6 +548,326 @@ def build_ftps_values_for_team(team_index: int):
     return ftps_vals, sampled_outcomes
 
 # --- Optimize Teams ---
-if st.button("🚀 Optimize Teams"):
+# BUTTON TERUG IN SIDEBAR VOOR STABILITEIT
+if st.sidebar.button("🚀 Optimize Teams"):
     all_teams = []
     prev_sets = []
+    
+    # Status bericht placeholder
+    solver_status_text = st.empty()
+    solver_status_text.info("🔄 Bezig met berekenen... even geduld.")
+    progress_bar = st.progress(0)
+
+    def get_rank1_name(ftps_vals=None):
+        cand = [p for p in players if str(p.get("Rank")) == "1"]
+        if cand:
+            return cand[0]["Name"]
+        if ftps_vals:
+            return max(ftps_vals.items(), key=lambda kv: kv[1])[0]
+        return max(
+            players,
+            key=lambda p: p.get("base_FTPS", p.get("FTPS", 0.0))
+        )["Name"]
+
+    if solver_mode == "Maximize Budget Usage":
+        # Check op haalbaarheid
+        min_possible = min(p["Value"] for p in players if p["Name"] not in exclude_players)
+        if min_possible * team_size > budget:
+            st.error(f"🚫 Onmogelijk! Minimaal budget nodig voor {team_size} spelers is {min_possible * team_size}, maar je budget is slechts {budget}.")
+            st.stop()
+
+        for i in range(num_teams):
+            solver_status_text.text(f"Optimizing team {i+1}...")
+            prob = LpProblem("opt_budget", LpMaximize)
+            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+
+            # Objective: Maximize Value
+            prob += lpSum(
+                x[n] * next(q["Value"] for q in players if q["Name"] == n)
+                for n in x
+            )
+            
+            # Constraints
+            prob += lpSum(x.values()) == team_size
+            prob += lpSum(
+                x[n] * next(q["Value"] for q in players if q["Name"] == n)
+                for n in x
+            ) <= budget
+
+            add_bracket_constraints(prob, x)
+            add_composition_constraints(prob, x)
+            add_global_usage_cap(prob, x, prev_sets)
+            # Min Diff regelt de uniekheid
+            add_min_diff(prob, x, prev_sets)
+            
+            # EXTRA: Forceer dat team anders is dan vorig team (als Min Diff = 0 is ingesteld)
+            if prev_sets:
+                 for prev in prev_sets:
+                     prob += lpSum(x[n] for n in prev) <= team_size - 1
+
+            for n in include_players:
+                prob += x[n] == 1
+            for n in exclude_players:
+                prob += x[n] == 0
+
+            prob.solve()
+            
+            if prob.status != 1:
+                if stop_early:
+                    st.warning(f"⚠️ Gestopt na {i} teams. Geen unieke combinaties meer mogelijk binnen budget/regels.")
+                    break
+                else:
+                    st.error(f"🚫 Team {i+1} is onmogelijk te maken. Controleer je budget of spelerslijst.")
+                    break
+                    
+            team = [p for p in players if x[p["Name"]].value() == 1]
+            all_teams.append(team)
+            prev_sets.append({p["Name"] for p in team})
+            progress_bar.progress((i + 1) / num_teams)
+
+    elif solver_mode == "Maximize FTPS":
+        for idx in range(num_teams):
+            solver_status_text.text(f"Optimizing team {idx+1}...")
+            ftps_vals, sampled_outcomes = build_ftps_values_for_team(idx)
+            prob = LpProblem(f"opt_ftps_{idx}", LpMaximize)
+            x = {p["Name"]: LpVariable(p["Name"], cat="Binary") for p in players}
+
+            prob += lpSum(x[n] * ftps_vals[n] for n in x)
+            prob += lpSum(x.values()) == team_size
+            prob += lpSum(
+                x[n] * next(q["Value"] for q in players if q["Name"] == n)
+                for n in x
+            ) <= budget
+
+            add_bracket_constraints(prob, x)
+            add_composition_constraints(prob, x)
+            add_global_usage_cap(prob, x, prev_sets)
+            add_min_diff(prob, x, prev_sets)
+
+            for n in include_players:
+                prob += x[n] == 1
+            for n in exclude_players:
+                prob += x[n] == 0
+
+            rank1_name = get_rank1_name(ftps_vals)
+            if idx == 0 and always_include_rank1_team1 and rank1_name in x:
+                prob += x[rank1_name] == 1, "ForceRank1Team1"
+            
+            if min_usage_rank1_pct > 0 and rank1_name in x:
+                min_needed = math.ceil(num_teams * min_usage_rank1_pct / 100)
+                used_so_far = sum(1 for prev in prev_sets if rank1_name in prev)
+                teams_left = num_teams - idx
+                if used_so_far + teams_left <= min_needed:
+                    prob += x[rank1_name] == 1, f"MinUseRank1_team{idx+1}"
+
+            prob.solve()
+            if prob.status != 1:
+                if stop_early:
+                    st.warning(f"⚠️ Stopped after {idx} teams. Unable to find more unique lineups.")
+                    break
+                else:
+                    st.error(f"🚫 Infeasible at team {idx+1}. Check constraints.")
+                    break
+
+            team = []
+            for p in players:
+                if x[p["Name"]].value() == 1:
+                    row = {**p}
+                    row["Adjusted FTPS"] = ftps_vals[p["Name"]]
+                    if use_outcome_tiers:
+                        sym = sampled_outcomes.get(p["Name"], None)
+                        row["OutcomeTier"] = p.get("OutcomeTier", 3)
+                        row["Outcome"] = sym
+                        if outcome_value_mode == "Use Fixed FTPS values":
+                            row["Outcome Value (FTPS)"] = (
+                                outcome_fixed_value(sym) if sym else None
+                            )
+                        else:
+                            row["Outcome Factor"] = (
+                                outcome_factor(sym) if sym else None
+                            )
+                    row["Tier"] = p.get("Tier")
+                    team.append(row)
+            all_teams.append(team)
+            prev_sets.append({p["Name"] for p in team})
+            progress_bar.progress((idx + 1) / num_teams)
+
+    else:  # Closest FTP Match with SMART BUDGET + SMART REPLACEMENT
+        cap = math.floor(num_teams * global_usage_pct / 100)
+        
+        # Calculate min_price based on VALID players only (not excluded ones)
+        valid_pool = [p for p in players if p["Name"] not in exclude_players]
+        min_possible_price = min(p["Value"] for p in valid_pool) if valid_pool else 0.0
+
+        for idx in range(num_teams):
+            solver_status_text.text(f"Optimizing team {idx+1} (Smart Match)...")
+            
+            # --- SMART SWAP LOGIC ---
+            current_excludes = list(exclude_players)
+            if idx > 0 and diff_count > 0 and prev_sets:
+                last_team_names = list(prev_sets[-1])
+                candidates_to_drop = [n for n in last_team_names if n not in include_players]
+                if len(candidates_to_drop) >= diff_count:
+                    drop_list = random.sample(candidates_to_drop, diff_count)
+                    current_excludes.extend(drop_list)
+            
+            slots, used_brackets, used_names = [None] * team_size, set(), set()
+            
+            # 1. Fill Includes
+            for n in include_players:
+                p0 = next(p for p in players if p["Name"] == n)
+                diffs = [
+                    (i, abs(p0["Value"] - target_values[i]))
+                    for i in range(team_size)
+                    if slots[i] is None
+                ]
+                if diffs:
+                    best_i = min(diffs, key=lambda x: x[1])[0]
+                    slots[best_i] = p0
+                    used_names.add(n)
+                    if use_bracket_constraints and p0.get("Bracket"):
+                        used_brackets.add(p0["Bracket"])
+            
+            # 2. Fill Remaining Slots (with Budget Awareness)
+            current_cost = sum(s["Value"] for s in slots if s)
+            
+            for i in range(team_size):
+                if slots[i] is not None:
+                    continue
+                tgt = target_values[i]
+                cands = []
+                
+                # How many slots left AFTER this one?
+                slots_remaining_after_this = sum(1 for s in slots if s is None) - 1
+                max_affordable_for_this_slot = budget - current_cost - (slots_remaining_after_this * min_possible_price)
+                
+                for p in players:
+                    # Basic Exclusions
+                    if p["Name"] in used_names or p["Name"] in current_excludes:
+                        continue
+                    if use_bracket_constraints and p.get("Bracket") in used_brackets:
+                        continue
+                    used = sum(1 for prev in prev_sets if p["Name"] in prev)
+                    if p["Name"] not in include_players and used >= cap:
+                        continue
+                    
+                    # --- BUDGET FILTER ---
+                    if p["Value"] > max_affordable_for_this_slot:
+                        continue
+                        
+                    cands.append(p)
+                
+                if not cands:
+                    # EMERGENCY FALLBACK: Grab cheapest valid player to prevent crash
+                    emergency_cands = [
+                        p for p in players 
+                        if p["Name"] not in used_names 
+                        and p["Name"] not in current_excludes
+                        and p["Value"] <= max_affordable_for_this_slot
+                        and (not use_bracket_constraints or p.get("Bracket") not in used_brackets)
+                    ]
+                    
+                    if emergency_cands:
+                        pick = min(emergency_cands, key=lambda p: p["Value"])
+                    else:
+                        if stop_early:
+                            st.warning(f"⚠️ Stopped after {idx} teams. Impossible to fill slot {i} within budget.")
+                            break
+                        else:
+                            st.error("🚫 Infeasible: Budget tight or constraints too strict.")
+                            st.stop()
+                else:
+                    pick = min(cands, key=lambda p: abs(p["Value"] - tgt))
+                
+                slots[i] = pick
+                used_names.add(pick["Name"])
+                if use_bracket_constraints and pick.get("Bracket"):
+                    used_brackets.add(pick["Bracket"])
+                
+                current_cost += pick["Value"]
+            
+            if any(s is None for s in slots):
+                break
+
+            cost = sum(p["Value"] for p in slots if p)
+            if cost > budget:
+                st.error(f"❌ Budget exceeded ({cost:.2f} > {budget:.2f}).")
+                st.stop()
+            
+            team = []
+            current_set = set()
+            for p in slots:
+                if p:
+                    row = {**p}
+                    row["Adjusted FTPS"] = p.get("base_FTPS", p.get("FTPS", 0.0))
+                    if use_outcome_tiers:
+                        row["OutcomeTier"] = p.get("OutcomeTier", 3)
+                    row["Tier"] = p.get("Tier")
+                    team.append(row)
+                    current_set.add(p["Name"])
+            
+            all_teams.append(team)
+            prev_sets.append(current_set)
+            progress_bar.progress((idx + 1) / num_teams)
+            
+            if len(all_teams) == num_teams:
+                break
+    
+    solver_status_text.empty()
+    progress_bar.empty()
+
+    if not all_teams:
+        st.error("⚠️ No teams generated. Please check your constraints.")
+    else:
+        st.success(f"✅ Generated {len(all_teams)} teams!")
+
+        # --- Display
+        for i, team in enumerate(all_teams, start=1):
+            with st.expander(f"Team {i}", expanded=(i == 1)):
+                df_t = pd.DataFrame(team)
+                df_t["Selectie (%)"] = df_t["Name"].apply(
+                    lambda n: round(
+                        sum(
+                            1 for t in all_teams
+                            if any(p["Name"] == n for p in t)
+                        ) / len(all_teams) * 100,
+                        1,
+                    )
+                )
+                display_cols = [
+                    c for c in [
+                        "Name", "Position", "Value", "Rank", "Tier",
+                        "OutcomeTier", "Outcome", "Outcome Factor", "Outcome Value (FTPS)",
+                        "base_FTPS", "Adjusted FTPS", "Bracket", "Selectie (%)"
+                    ]
+                    if c in df_t.columns
+                ]
+                display_cols += [c for c in df_t.columns if c not in display_cols]
+                st.dataframe(df_t[display_cols], use_container_width=True)
+
+        # --- Download
+        merged = []
+        for idx, team in enumerate(all_teams, start=1):
+            df_t = pd.DataFrame(team)
+            df_t["Team"] = idx
+            df_t["Selectie (%)"] = df_t["Name"].apply(
+                lambda n: round(
+                    sum(
+                        1 for t in all_teams
+                        if any(p["Name"] == n for p in t)
+                    ) / len(all_teams) * 100,
+                    1,
+                )
+            )
+            merged.append(df_t)
+        merged_df = pd.concat(merged, ignore_index=True)
+        buf = BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            merged_df.to_excel(writer, index=False, sheet_name="All Teams")
+        buf.seek(0)
+        st.download_button(
+            "📥 Download All Teams (Excel)",
+            buf,
+            file_name="all_teams_v4_0.xlsx",
+            mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
+        )
